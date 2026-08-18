@@ -2,6 +2,11 @@ from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session
 from sqlalchemy import text
 from database import get_db
+from helpers.notification_helper import (
+    create_notification,
+    get_request_owner,
+    get_assignment_request_owner
+)
 
 app = FastAPI()
 
@@ -206,10 +211,25 @@ def assign_request(request_id: int, db: Session = Depends(get_db)):
 
     db.execute(query, {"id": request_id})
 
+    # notification
+    # Get the student who created this complaint
+    owner = get_request_owner(db, request_id)
+
+    if owner:
+        create_notification(
+            db=db,
+            user_id=owner["user_id"],
+            complaint_id=owner["complaint_id"],
+            title="Complaint Assigned",
+            message=f"Your complaint '{owner['subject']}' has been assigned to a staff member.",
+            notification_type="assignment"
+        )
+    
+
     db.commit()
 
     return {
-        "message": "Request assigned",
+        "message": "Request assigned and notification created",
         "staff_id": staff_id
     }
 
@@ -222,10 +242,14 @@ def reassign(
     db: Session = Depends(get_db)
 ):
 
+    owner = get_assignment_request_owner(db, assignment_id)
+
     # Make old assignment inactive
+    
+    ## team 3 changes: change in assignment_status value from " inactive -> cancelled " 
     query = text("""
         UPDATE assignment
-        SET assignment_status = 'inactive'
+        SET assignment_status = 'cancelled'
         WHERE assignment_id = :id
     """)
 
@@ -246,6 +270,127 @@ def reassign(
         "id": assignment_id
     })
 
+    # create a notification on reassignment
+    create_notification(
+        db=db,
+        user_id=owner["user_id"],
+        complaint_id=owner["complaint_id"],
+        title="Complaint Reassigned",
+        message=f"Your complaint '{owner['subject']}' has been reassigned to another staff member.",
+        notification_type="reassignment"
+    )
+
+
     db.commit()
 
-    return {"message": "Assignment reassigned"}
+    return {"message": "Assignment reassigned and notification created"}
+
+# get all notification for user
+@app.get("/notifications/{user_id}")
+def get_notifications(
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    query = text("""
+        SELECT
+            notification_id,
+            complaint_id,
+            title,
+            message,
+            notification_type,
+            is_read,
+            created_at
+        FROM notifications
+        WHERE user_id = :user_id
+        ORDER BY created_at DESC
+    """)
+
+    result = db.execute(
+        query,
+        {"user_id": user_id}
+    )
+
+    notifications = [
+        dict(row._mapping)
+        for row in result
+    ]
+
+    return notifications
+
+# get notification count which are not readed yet
+@app.get("/notifications/{user_id}/unread-count")
+def get_unread_notification_count(
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    query = text("""
+        SELECT COUNT(*) AS unread_count
+        FROM notifications
+        WHERE user_id = :user_id
+        AND is_read = FALSE
+    """)
+
+    result = db.execute(
+        query,
+        {"user_id": user_id}
+    )
+
+    row = result.fetchone()
+
+    return {
+        "unread_count": row._mapping["unread_count"]
+    }
+
+# mark notification as read
+@app.put("/notifications/{notification_id}/read")
+def mark_notification_as_read(
+    notification_id: int,
+    db: Session = Depends(get_db)
+):
+    query = text("""
+        UPDATE notifications
+        SET is_read = TRUE
+        WHERE notification_id = :notification_id
+    """)
+
+    result = db.execute(
+        query,
+        {"notification_id": notification_id}
+    )
+
+    if result.rowcount == 0:
+        raise HTTPException(
+            status_code=404,
+            detail="Notification not found"
+        )
+
+    db.commit()
+
+    return {
+        "message": "Notification marked as read"
+    }
+
+# mark all notifications as read
+@app.put("/notifications/{user_id}/read-all")
+def mark_all_notifications_as_read(
+    user_id: str,
+    db: Session = Depends(get_db)
+):
+    query = text("""
+        UPDATE notifications
+        SET is_read = TRUE
+        WHERE user_id = :user_id
+        AND is_read = FALSE
+    """)
+
+    result = db.execute(
+        query,
+        {"user_id": user_id}
+    )
+
+    db.commit()
+
+    return {
+        "message": "All notifications marked as read",
+        "updated_count": result.rowcount
+    }
