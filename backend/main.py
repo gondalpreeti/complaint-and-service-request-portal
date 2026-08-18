@@ -132,6 +132,21 @@ def next_request(db: Session = Depends(get_db)):
 @app.post("/assign/{request_id}")
 def assign_request(request_id: int, db: Session = Depends(get_db)):
 
+    # Check if request is already assigned
+    query = text("""
+        SELECT assignment_id
+        FROM assignment
+        WHERE request_id = :id
+        AND assignment_status = 'active'
+    """)
+
+    result = db.execute(query, {"id": request_id})
+    row = result.fetchone()
+
+    if row:
+        return {"message": "Request already assigned"}
+
+    # Get complaint category
     query = text("""
         SELECT c.category_id
         FROM complaints c
@@ -148,6 +163,7 @@ def assign_request(request_id: int, db: Session = Depends(get_db)):
 
     category_id = row[0]
 
+    # Find available staff with least assignments
     query = text("""
         SELECT s.staff_id
         FROM staff s
@@ -168,6 +184,7 @@ def assign_request(request_id: int, db: Session = Depends(get_db)):
 
     staff_id = row[0]
 
+    # Create assignment
     query = text("""
         INSERT INTO assignment
         (request_id, staff_id, assigned_by, due_date)
@@ -180,6 +197,7 @@ def assign_request(request_id: int, db: Session = Depends(get_db)):
         "staff": staff_id
     })
 
+    # Update request status
     query = text("""
         UPDATE service_request
         SET status = 'assigned'
@@ -204,17 +222,28 @@ def reassign(
     db: Session = Depends(get_db)
 ):
 
+    # Make old assignment inactive
     query = text("""
         UPDATE assignment
-        SET staff_id = :staff_id,
-            assigned_by = :manager_id
-        WHERE assignment_id = :assignment_id
+        SET assignment_status = 'inactive'
+        WHERE assignment_id = :id
+    """)
+
+    db.execute(query, {"id": assignment_id})
+
+    # Create new assignment
+    query = text("""
+        INSERT INTO assignment
+        (request_id, staff_id, assigned_by, due_date)
+        SELECT request_id, :staff, :manager, due_date
+        FROM assignment
+        WHERE assignment_id = :id
     """)
 
     db.execute(query, {
-        "staff_id": staff_id,
-        "manager_id": manager_id,
-        "assignment_id": assignment_id
+        "staff": staff_id,
+        "manager": manager_id,
+        "id": assignment_id
     })
 
     db.commit()
