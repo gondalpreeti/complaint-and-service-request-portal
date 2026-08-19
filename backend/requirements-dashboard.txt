@@ -1,0 +1,8 @@
+# Packages needed specifically for the dashboard module.
+# Merge these into the team's shared requirements.txt.
+
+fastapi>=0.110
+uvicorn[standard]>=0.29
+asyncpg>=0.29          # PostgreSQL driver + connection pool
+python-jose[cryptography]>=3.3   # JWT decode
+pydantic>=2.6
