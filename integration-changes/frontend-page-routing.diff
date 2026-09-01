@@ -1,0 +1,17 @@
+--- a/frontend/src/pages/Dashboard.jsx
++++ b/frontend/src/pages/Dashboard.jsx
+@@ -6,2 +6,3 @@
+ import DashboardCharts from "../components/dashboard/DashboardCharts";
++import ReportsView from "../components/reports/ReportsView";
+ import { useDashboardData } from "../hooks/useDashboardData";
+@@ -42,3 +43,3 @@
+-            <h2 className="text-base font-semibold text-slate-800">Dashboard</h2>
++            <h2 className="text-base font-semibold text-slate-800">
++              {activeTab === "dashboard" ? "Dashboard" : "Reports & Analytics"}
++            </h2>
+@@ -99,2 +100,5 @@
+             )}
++
++            {/* View 2: Reports & Analytics */}
++            {activeTab === "reports" && <ReportsView />}
+           </div>
