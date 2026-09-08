@@ -1,11 +1,13 @@
 import React, { useState } from 'react'
 import ComplaintForm from '../components/ComplaintForm'
 import SuccessMessage from '../components/SuccessMessage'
+import { useAuth } from '../context/AuthContext'
 
 function RegisterComplaint() {
-  const [submitted, setSubmitted]   = useState(false)
+  const { user, logout } = useAuth()
+  const [submitted, setSubmitted] = useState(false)
   const [complaintId, setComplaintId] = useState('')
-  const [formKey, setFormKey]       = useState(0)
+  const [formKey, setFormKey] = useState(0)
 
   const handleSuccess = (id) => {
     setComplaintId(id)
@@ -22,6 +24,8 @@ function RegisterComplaint() {
   const handleDashboard = () => {
     window.history.back()
   }
+
+  const userPrn = user?.user_metadata?.prn
 
   return (
     <div className="page-wrapper">
@@ -114,8 +118,28 @@ function RegisterComplaint() {
       {/* ── RIGHT PANEL — Form ───────────────────── */}
       <main className="right-panel">
 
-        {/* Back to Dashboard — top right */}
-        <div className="top-bar">
+        {/* Top Bar — user info and sign out / back */}
+        <div className="top-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          {user ? (
+            <div className="dashboard-user-bar">
+              <div className="user-identity-badge" title={user.email}>
+                <span className="user-avatar-dot" />
+                <span className="user-email-text">{user.email}</span>
+                {userPrn && <span className="user-prn-pill">PRN: {userPrn}</span>}
+              </div>
+              <button className="btn-signout" type="button" onClick={logout} title="Sign Out of CampusCare">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                  <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
+                  <polyline points="16 17 21 12 16 7" />
+                  <line x1="21" y1="12" x2="9" y2="12" />
+                </svg>
+                Sign Out
+              </button>
+            </div>
+          ) : (
+            <div />
+          )}
+
           <button className="back-btn" type="button" onClick={handleDashboard}>
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
               <path d="M19 12H5" />
