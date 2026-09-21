@@ -75,7 +75,7 @@ class StaffDueDateAlert:
         if alert == "OVERDUE ALERT":
 
             return (
-                f"🔴 Due Date Alert: "
+                f" Due Date Alert: "
                 f"Complaint #{self.request_id} assigned to you "
                 f"is overdue. "
                 f"Due date was {self.due_date}. "
@@ -85,7 +85,7 @@ class StaffDueDateAlert:
         elif alert == "DUE TODAY ALERT":
 
             return (
-                f"🔔 Due Date Alert: "
+                f" Due Date Alert: "
                 f"Complaint #{self.request_id} assigned to you "
                 f"is due today. "
                 f"Please complete it today."
@@ -94,7 +94,7 @@ class StaffDueDateAlert:
         elif alert == "DUE SOON ALERT":
 
             return (
-                f"⚠️ Due Date Alert: "
+                f" Due Date Alert: "
                 f"Complaint #{self.request_id} assigned to you "
                 f"is due soon on {self.due_date}. "
                 f"Please take necessary action."
