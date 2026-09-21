@@ -9,7 +9,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.database import connect_db, disconnect_db
-from app.routers import dashboard
+from app.routers import dashboard, escalations
 
 app = FastAPI(title="Complaint & Service Request Portal API")
 
@@ -33,6 +33,7 @@ async def on_shutdown():
 
 
 app.include_router(dashboard.router)
+app.include_router(escalations.router)
 
 
 @app.get("/health")
