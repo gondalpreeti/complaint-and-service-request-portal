@@ -49,14 +49,12 @@ async def get_dashboard_summary(
         )
 
     try:
-        kpis, status_dist, category_dist, priority_dist, over_time, escalation_stats = await asyncio.gather(
-            dashboard_queries.get_kpi_summary(conn, filters),
-            dashboard_queries.get_status_distribution(conn, filters),
-            dashboard_queries.get_category_distribution(conn, filters),
-            dashboard_queries.get_priority_distribution(conn, filters),
-            dashboard_queries.get_complaints_over_time(conn, filters),
-            dashboard_queries.get_escalation_stats(conn, filters),
-        )
+        kpis = await dashboard_queries.get_kpi_summary(conn, filters)
+        status_dist = await dashboard_queries.get_status_distribution(conn, filters)
+        category_dist = await dashboard_queries.get_category_distribution(conn, filters)
+        priority_dist = await dashboard_queries.get_priority_distribution(conn, filters)
+        over_time = await dashboard_queries.get_complaints_over_time(conn, filters)
+        escalation_stats = await dashboard_queries.get_escalation_stats(conn, filters)
     except asyncpg.PostgresError:
         raise HTTPException(
             status_code=http_status.HTTP_503_SERVICE_UNAVAILABLE,
