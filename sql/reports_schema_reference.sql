@@ -1,0 +1,36 @@
+-- ==============================================================================
+-- Reports & Analytics: Database Schema Reference
+-- ==============================================================================
+-- Schema structure and relationships used by the Reports & Analytics module:
+--
+-- 1. categories
+--    - category_id: SERIAL PRIMARY KEY
+--    - category_name: VARCHAR(100) UNIQUE NOT NULL
+--
+-- 2. complaints
+--    - complaint_id: SERIAL / UUID PRIMARY KEY
+--    - user_id: INT (FK to users/students)
+--    - category_id: INT (FK to categories.category_id)
+--    - subject: VARCHAR(255) NOT NULL
+--    - description: TEXT NOT NULL
+--    - created_at: TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+--
+-- 3. service_request
+--    - request_id: SERIAL PRIMARY KEY
+--    - complaint_id: INT (FK to complaints.complaint_id)
+--    - category_id: INT (FK to categories.category_id)
+--    - priority_status: VARCHAR(20) DEFAULT 'Medium'  -- 'Critical', 'High', 'Medium', 'Low'
+--    - status: VARCHAR(30) DEFAULT 'Pending'          -- 'Pending', 'Assigned', 'In Progress', 'Resolved', 'Closed'
+--    - created_at: TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+--    - updated_at: TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+--
+-- 4. assignment (Optional / Staff tracking)
+--    - assignment_id: SERIAL PRIMARY KEY
+--    - request_id: INT (FK to service_request.request_id)
+--    - staff_id: INT (FK to staff/users)
+--    - assigned_by: INT (FK to admin/manager user)
+--    - assignment_status: VARCHAR(30)
+--    - assigned_date: DATE
+--    - due_date: DATE
+--    - remarks: TEXT
+-- ==============================================================================

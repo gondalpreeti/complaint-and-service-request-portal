@@ -1,0 +1,9 @@
+--- a/backend/app/main.py
++++ b/backend/app/main.py
+@@ -12,3 +12,4 @@
+ from app.core.database import connect_db, disconnect_db
+ from app.routers import dashboard, reports
+ 
+@@ -35,3 +36,4 @@
+ app.include_router(dashboard.router)
++app.include_router(reports.router)
