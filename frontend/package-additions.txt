@@ -1,0 +1,11 @@
+Packages needed specifically for the dashboard module.
+Run inside your frontend/ directory:
+
+  npm install axios recharts
+
+axios   - HTTP client for calling the dashboard API
+recharts - chart library (pie/bar/line) used in DashboardCharts.jsx
+
+Also add to frontend/.env (Vite project):
+
+  VITE_API_URL=http://localhost:8000
