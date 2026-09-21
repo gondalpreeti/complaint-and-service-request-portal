@@ -4,7 +4,7 @@ import SuccessMessage from '../components/SuccessMessage'
 import { useAuth } from '../context/AuthContext'
 
 function RegisterComplaint() {
-  const { user, logout } = useAuth()
+  const { user, logout, navigateTo } = useAuth()
   const [submitted, setSubmitted] = useState(false)
   const [complaintId, setComplaintId] = useState('')
   const [formKey, setFormKey] = useState(0)
@@ -22,7 +22,11 @@ function RegisterComplaint() {
   }
 
   const handleDashboard = () => {
-    window.history.back()
+    if (navigateTo) {
+      navigateTo('dashboard')
+    } else {
+      window.history.back()
+    }
   }
 
   const userPrn = user?.user_metadata?.prn

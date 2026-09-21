@@ -52,13 +52,11 @@ async def get_reports_summary(
     )
 
     try:
-        kpis, cat_dist, status_dist, prio_dist, time_trend = await asyncio.gather(
-            report_queries.get_report_kpi_summary(conn, filters),
-            report_queries.get_report_category_breakdown(conn, filters),
-            dashboard_queries.get_status_distribution(conn, dash_filters),
-            dashboard_queries.get_priority_distribution(conn, dash_filters),
-            dashboard_queries.get_complaints_over_time(conn, dash_filters),
-        )
+        kpis = await report_queries.get_report_kpi_summary(conn, filters)
+        cat_dist = await report_queries.get_report_category_breakdown(conn, filters)
+        status_dist = await dashboard_queries.get_status_distribution(conn, dash_filters)
+        prio_dist = await dashboard_queries.get_priority_distribution(conn, dash_filters)
+        time_trend = await dashboard_queries.get_complaints_over_time(conn, dash_filters)
     except Exception as e:
         raise HTTPException(
             status_code=http_status.HTTP_500_INTERNAL_SERVER_ERROR,

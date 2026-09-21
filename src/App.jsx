@@ -7,10 +7,11 @@ import OtpVerificationView from './components/auth/OtpVerificationView'
 import ForgetPasswordView from './components/auth/ForgetPasswordView'
 import ResetPasswordView from './components/auth/ResetPasswordView'
 import RegisterComplaint from './pages/RegisterComplaint'
+import Dashboard from '../frontend/src/pages/Dashboard'
 import './styles/auth.css'
 
 function AppContent() {
-  const { currentView, loading, user } = useAuth()
+  const { currentView, loading, user, navigateTo, logout } = useAuth()
 
   // Initial session check loading screen
   if (loading) {
@@ -25,6 +26,16 @@ function AppContent() {
   // Active view routing
   switch (currentView) {
     case 'dashboard':
+      return (
+        <Dashboard
+          onNavigate={navigateTo}
+          onLogout={logout}
+          userEmail={user?.email}
+        />
+      )
+
+    case 'complaint':
+    case 'register-complaint':
       return <RegisterComplaint />
 
     case 'register':
