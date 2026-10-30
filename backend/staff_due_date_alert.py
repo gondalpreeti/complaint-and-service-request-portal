@@ -10,22 +10,23 @@ class StaffDueDateAlert:
 
     def __init__(
         self,
-        request_id,
+        complaint_id,
         staff_id,
+        user_id,
         staff_name,
         priority,
         status,
         due_date
     ):
-        self.request_id = request_id
+        self.complaint_id = complaint_id
         self.staff_id = staff_id
+        self.user_id = user_id  # UUID from users table
         self.staff_name = staff_name
         self.priority = priority
         self.status = status
         self.due_date = due_date
 
     def is_resolved(self):
-
         return str(self.status).lower() == "resolved"
 
     # ------------------------------------------------
@@ -39,101 +40,69 @@ class StaffDueDateAlert:
 
         today = date.today()
 
-        # Convert string date if required
         if isinstance(self.due_date, str):
             due = date.fromisoformat(self.due_date[:10])
         else:
             due = self.due_date
 
-        # Resolved complaint
         if self.is_resolved():
             return "NO ALERT"
 
-        # Due date already passed
         if today > due:
             return "OVERDUE ALERT"
 
-        # Due date is today
         if today == due:
             return "DUE TODAY ALERT"
 
-        # Due date is within next 3 days
         if today + timedelta(days=3) >= due:
             return "DUE SOON ALERT"
 
-        # Due date is still far away
         return "NO ALERT"
 
     # ------------------------------------------------
-    # Create Message For Staff
+    # Create Title and Message For Staff
     # ------------------------------------------------
+
+    def get_title(self):
+        alert = self.get_alert()
+        if alert == "OVERDUE ALERT":
+            return "Complaint Overdue"
+        elif alert == "DUE TODAY ALERT":
+            return "Complaint Due Today"
+        elif alert == "DUE SOON ALERT":
+            return "Complaint Due Soon"
+        elif alert == "NO DUE DATE":
+            return "Complaint Without Due Date"
+        return None
 
     def get_message(self):
 
         alert = self.get_alert()
 
         if alert == "OVERDUE ALERT":
-
-            return (
-                f" Due Date Alert: "
-                f"Complaint #{self.request_id} assigned to you "
-                f"is overdue. "
-                f"Due date was {self.due_date}. "
-                f"Please take immediate action."
-            )
-
+            return f"Due Date Alert: Complaint #{self.complaint_id} assigned to you is overdue. Due date was {self.due_date}. Please take immediate action."
         elif alert == "DUE TODAY ALERT":
-
-            return (
-                f" Due Date Alert: "
-                f"Complaint #{self.request_id} assigned to you "
-                f"is due today. "
-                f"Please complete it today."
-            )
-
+            return f"Due Date Alert: Complaint #{self.complaint_id} assigned to you is due today. Please complete it today."
         elif alert == "DUE SOON ALERT":
-
-            return (
-                f" Due Date Alert: "
-                f"Complaint #{self.request_id} assigned to you "
-                f"is due soon on {self.due_date}. "
-                f"Please take necessary action."
-            )
-
+            return f"Due Date Alert: Complaint #{self.complaint_id} assigned to you is due soon on {self.due_date}. Please take necessary action."
         elif alert == "NO DUE DATE":
+            return f"Complaint #{self.complaint_id} does not have a due date."
 
-            return (
-                f"Complaint #{self.request_id} "
-                f"does not have a due date."
-            )
-
-        # No alert
         return None
 
-    # ------------------------------------------------
-    # Display Alert
-    # ------------------------------------------------
-
-    def display_alert(self):
-
-        alert = self.get_alert()
-        message = self.get_message()
-
-        print(
-            f"Request ID: {self.request_id} | "
-            f"Staff ID: {self.staff_id} | "
-            f"Staff: {self.staff_name} | "
-            f"Priority: {self.priority} | "
-            f"Due Date: {self.due_date} | "
-            f"Alert: {alert}"
-        )
-
-        # Display message only when alert exists
-        if message:
-
-            print(
-                f"Message: {message}"
-            )
+    def to_dict(self):
+        return {
+            "complaint_id": self.complaint_id,
+            "staff_id": self.staff_id,
+            "user_id": str(self.user_id) if self.user_id else None,
+            "staff_name": self.staff_name,
+            "priority": self.priority,
+            "status": self.status,
+            "due_date": str(self.due_date) if self.due_date else None,
+            "alert_type": self.get_alert(),
+            "title": self.get_title(),
+            "message": self.get_message()
+        }
 
 
 # ------------------------------------------------
@@ -143,7 +112,6 @@ class StaffDueDateAlert:
 class StaffAlertManager:
 
     def __init__(self):
-
         self.alerts = []
 
     def get_assignments_from_database(self):
@@ -151,142 +119,220 @@ class StaffAlertManager:
         conn = get_connection()
         cursor = conn.cursor()
 
-        # -----------------------------------------
-        # Get assignment information
-        # -----------------------------------------
-
+        # 1. Get assignment information
         cursor.execute("""
             SELECT
-                a.request_id,
+                a.complaint_id,
                 a.staff_id,
                 a.due_date
             FROM assignment a
             WHERE a.staff_id IS NOT NULL
         """)
-
         assignments = cursor.fetchall()
 
-        # -----------------------------------------
-        # Get service request information
-        # -----------------------------------------
-
+        # 2. Get complaint information
         cursor.execute("""
             SELECT
-                request_id,
+                complaint_id,
                 priority_status,
                 status
-            FROM service_request
+            FROM complaints
         """)
+        complaints = cursor.fetchall()
 
-        service_requests = cursor.fetchall()
-
-        # -----------------------------------------
-        # Get staff information
-        # -----------------------------------------
-
+        # 3. Get staff information INCLUDING user_id (UUID)
         cursor.execute("""
             SELECT
                 staff_id,
-                full_name
+                full_name,
+                user_id
             FROM staff
         """)
-
         staff_members = cursor.fetchall()
 
         cursor.close()
         conn.close()
 
-        # -----------------------------------------
-        # Create maps
-        # -----------------------------------------
-
-        request_map = {
-            request_id: (priority, status)
-            for request_id, priority, status
-            in service_requests
+        # Create lookup maps
+        complaint_map = {
+            complaint_id: (priority, status)
+            for complaint_id, priority, status in complaints
         }
 
         staff_map = {
-            staff_id: full_name
-            for staff_id, full_name
-            in staff_members
+            staff_id: (full_name, user_id)
+            for staff_id, full_name, user_id in staff_members
         }
 
-        # -----------------------------------------
         # Create StaffDueDateAlert objects
-        # -----------------------------------------
+        for complaint_id, staff_id, due_date in assignments:
 
-        for request_id, staff_id, due_date in assignments:
-
-            request_data = request_map.get(request_id)
-
-            if request_data is None:
+            complaint_data = complaint_map.get(complaint_id)
+            if complaint_data is None:
                 continue
 
-            priority, status = request_data
+            priority, status = complaint_data
 
-            staff_name = staff_map.get(
-                staff_id,
-                "Unknown Staff"
-            )
+            staff_data = staff_map.get(staff_id)
+            if staff_data is None:
+                continue
+
+            staff_name, user_id = staff_data
 
             alert = StaffDueDateAlert(
-                request_id,
-                staff_id,
-                staff_name,
-                priority,
-                status,
-                due_date
+                complaint_id=complaint_id,
+                staff_id=staff_id,
+                user_id=user_id,
+                staff_name=staff_name,
+                priority=priority,
+                status=status,
+                due_date=due_date
             )
-
             self.alerts.append(alert)
 
     # ------------------------------------------------
-    # Display Only Active Alerts
+    # SAVE ALERTS TO NOTIFICATIONS TABLE
     # ------------------------------------------------
 
-    def display_alerts(self):
+    def save_alerts_to_notifications(self):
+        """
+        Inserts a row into the notifications table for every active alert.
+        Because is_read defaults to FALSE, the notification will keep
+        appearing on the staff dashboard until they mark it as read.
+        """
+        conn = get_connection()
+        cursor = conn.cursor()
 
         active_alerts = [
-            alert
-            for alert in self.alerts
+            alert for alert in self.alerts
             if alert.get_alert() != "NO ALERT"
         ]
 
-        if not active_alerts:
-
-            print("No due date alerts.")
-
-            return
-
-        print("\n===== STAFF DUE DATE ALERTS =====")
-        print("------------------------------------------")
+        inserted = 0
 
         for alert in active_alerts:
+            # Skip alerts if staff has no linked user account
+            if alert.user_id is None:
+                continue
 
-            alert.display_alert()
+            # Check if an UNREAD notification already exists for this specific alert
+            cursor.execute("""
+                SELECT notification_id
+                FROM notifications
+                WHERE user_id = %s
+                  AND complaint_id = %s
+                  AND notification_type = %s
+                  AND is_read = FALSE
+            """, (alert.user_id, alert.complaint_id, alert.get_alert()))
+
+            existing = cursor.fetchone()
+
+            # Insert only if it doesn't exist (prevents duplicate notifications)
+            if existing is None:
+                cursor.execute("""
+                    INSERT INTO notifications
+                        (user_id, complaint_id, title, message, notification_type, is_read)
+                    VALUES (%s, %s, %s, %s, %s, FALSE)
+                """, (
+                    alert.user_id,
+                    alert.complaint_id,
+                    alert.get_title(),
+                    alert.get_message(),
+                    alert.get_alert()
+                ))
+                inserted += 1
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return inserted
+
+    # ------------------------------------------------
+    # GET UNREAD NOTIFICATIONS FOR A USER
+    # ------------------------------------------------
+
+    def get_unread_notifications_for_user(self, user_id):
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT
+                notification_id,
+                user_id,
+                complaint_id,
+                title,
+                message,
+                notification_type,
+                is_read,
+                created_at
+            FROM notifications
+            WHERE user_id = %s
+              AND is_read = FALSE
+            ORDER BY created_at DESC
+        """, (str(user_id),))
+
+        rows = cursor.fetchall()
+
+        cursor.close()
+        conn.close()
+
+        notifications = []
+        for row in rows:
+            notifications.append({
+                "notification_id": row[0],
+                "user_id": str(row[1]),
+                "complaint_id": row[2],
+                "title": row[3],
+                "message": row[4],
+                "notification_type": row[5],
+                "is_read": row[6],
+                "created_at": str(row[7]) if row[7] else None
+            })
+
+        return notifications
+
+    # ------------------------------------------------
+    # MARK A NOTIFICATION AS READ
+    # ------------------------------------------------
+
+    def mark_notification_as_read(self, notification_id, user_id):
+        conn = get_connection()
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            UPDATE notifications
+            SET is_read = TRUE
+            WHERE notification_id = %s
+              AND user_id = %s
+              AND is_read = FALSE
+        """, (notification_id, str(user_id)))
+
+        updated = cursor.rowcount
+
+        conn.commit()
+        cursor.close()
+        conn.close()
+
+        return updated > 0
 
 
 # ------------------------------------------------
-# Main Program
+# Main Program (Testing)
 # ------------------------------------------------
 
 if __name__ == "__main__":
-
     print("\n===== STAFF ALERT FOR DUE DATE =====")
-
     try:
-
-        # Create manager object
         manager = StaffAlertManager()
-
-        # Get assignments from database
+        
+        # 1. Fetch from database
         manager.get_assignments_from_database()
-
-        # Display active alerts
-        manager.display_alerts()
+        
+        # 2. Save to notifications table (This creates unread notifications)
+        inserted = manager.save_alerts_to_notifications()
+        print(f"\nNew unread notifications inserted: {inserted}")
 
     except Exception as error:
-
         print("\nDatabase Error:")
         print(error)
