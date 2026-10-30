@@ -1,3 +1,53 @@
+from fastapi import APIRouter, Depends, HTTPException
+from staff_due_date_alert import StaffAlertManager
+
+# Import your authentication function here (e.g., get_current_user)
+# from your_auth_module import get_current_user
+
+router = APIRouter(prefix="/api/staff", tags=["Staff Notifications"])
+
+@router.get("/dashboard/notifications")
+async def get_my_notifications(current_user = Depends(get_current_user)):
+    # Extract the UUID from the current user object
+    user_id = current_user.get("user_id") 
+    
+    if not user_id:
+        raise HTTPException(status_code=401, detail="User ID not found")
+
+    manager = StaffAlertManager()
+    
+    # 1. Check for alerts from the database
+    manager.get_assignments_from_database()
+    
+    # 2. Save any new alerts to the notifications table (is_read = False)
+    manager.save_alerts_to_notifications()
+    
+    # 3. Return only the unread notifications for this specific user
+    notifications = manager.get_unread_notifications_for_user(user_id)
+    
+    return {
+        "unread_count": len(notifications),
+        "notifications": notifications
+    }
+
+
+@router.put("/dashboard/notifications/{notification_id}/read")
+async def read_notification(notification_id: int, current_user = Depends(get_current_user)):
+    # Extract the UUID from the current user object
+    user_id = current_user.get("user_id")
+    
+    manager = StaffAlertManager()
+    
+    # Mark the specific notification as read in the database
+    success = manager.mark_notification_as_read(notification_id, user_id)
+    
+    if not success:
+        raise HTTPException(
+            status_code=404, 
+            detail="Notification not found or already read"
+        )
+        
+    return {"message": "Marked as read successfully"}
 """
 FastAPI application entrypoint.
 
