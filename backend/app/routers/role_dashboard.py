@@ -289,6 +289,11 @@ async def get_manager_dashboard():
     return fetch_live_role_dashboard("manager")
 
 
+@router.get("/admin")
+async def get_admin_dashboard():
+    return fetch_live_role_dashboard("admin")
+
+
 @router.get("/{role_name}")
 async def get_generic_role_dashboard(role_name: str):
     norm_role = role_name.lower().replace("-", "_")

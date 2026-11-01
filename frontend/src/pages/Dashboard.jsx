@@ -58,7 +58,6 @@ export default function Dashboard({ onNavigate, onLogout, userEmail, roleId, rol
   };
 
   const [activeTab, setActiveTab] = useState(() => getInitialTab(effectiveRoleId));
-  const [rolePersona, setRolePersona] = useState("student");
 
   // Synchronize tab when switching role view
   useEffect(() => {
@@ -164,42 +163,23 @@ export default function Dashboard({ onNavigate, onLogout, userEmail, roleId, rol
         </div>
       </header>
 
-      {/* Role View Persona Switcher (Only visible in Role Views tab for Admin) */}
-      {activeTab === "role-dashboard" && effectiveRoleId === 2 && (
-        <div className="mb-6 flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
-          <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
-            Switch Persona:
-          </span>
-          <div className="flex gap-2">
-            {[
-              { id: "student", label: "Student / Faculty" },
-              { id: "staff", label: "Service Staff" },
-              { id: "manager", label: "Staff Manager" },
-            ].map((p) => (
-              <button
-                key={p.id}
-                type="button"
-                onClick={() => setRolePersona(p.id)}
-                className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  rolePersona === p.id
-                    ? "bg-blue-600 text-white"
-                    : "bg-slate-100 text-slate-700 hover:bg-slate-200"
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-
       {/* Main Tab Content */}
       {activeTab === "escalations" ? (
         <EscalationConsole roleId={effectiveRoleId} />
       ) : activeTab === "reports" ? (
         <ReportsView />
       ) : activeTab === "role-dashboard" ? (
-        <RoleDashboard key={rolePersona} initialRole={rolePersona} />
+        <RoleDashboard
+          initialRole={
+            effectiveRoleId === 2
+              ? "admin"
+              : effectiveRoleId === 3
+              ? "manager"
+              : effectiveRoleId === 4
+              ? "staff"
+              : "student"
+          }
+        />
       ) : (
         <AnalyticsDashboard />
       )}
