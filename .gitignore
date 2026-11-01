@@ -13,6 +13,8 @@ node_modules/
 dist
 dist/
 dist-ssr
+.vite
+.vite/
 *.local
 
 # Editor directories and files

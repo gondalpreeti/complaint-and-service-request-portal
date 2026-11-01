@@ -144,16 +144,33 @@ function ComplaintForm({ onSuccess }) {
         }
       }
 
-      // Check current user session
+      // Check current user session and ensure public.users entry exists
       let currentUserId = null
       try {
         const { data: { user } } = await supabase.auth.getUser()
-        if (user?.id) currentUserId = user.id
+        if (user?.id) {
+          const { data: existingUser } = await supabase
+            .from('users')
+            .select('user_id')
+            .eq('user_id', user.id)
+            .maybeSingle()
+
+          if (!existingUser) {
+            await supabase.from('users').insert({
+              user_id: user.id,
+              email: user.email,
+              fullname: user.user_metadata?.full_name || user.email?.split('@')[0] || 'Student',
+              prn_number: user.user_metadata?.prn || ('PRN-' + (user.id ? user.id.slice(0, 8) : '00000000')),
+              role_id: 1,
+            })
+          }
+          currentUserId = user.id
+        }
       } catch (uErr) {
-        // guest mode
+        console.warn('[ComplaintForm] User identity resolution notice:', uErr)
       }
 
-      // Insert record into Supabase `complaints` table
+      // Insert record into Supabase complaints table
       const insertRecord = {
         subject: title.trim(),
         description: description.trim(),
@@ -166,12 +183,26 @@ function ComplaintForm({ onSuccess }) {
         insertRecord.user_id = currentUserId
       }
 
-      const { data, error } = await supabase
+      let data, error
+      const firstAttempt = await supabase
         .from('complaints')
         .insert(insertRecord)
         .select()
         .single()
 
+      if (firstAttempt.error && firstAttempt.error.message?.includes('fk_complaint_user')) {
+        delete insertRecord.user_id
+        const fallbackAttempt = await supabase
+          .from('complaints')
+          .insert(insertRecord)
+          .select()
+          .single()
+        data = fallbackAttempt.data
+        error = fallbackAttempt.error
+      } else {
+        data = firstAttempt.data
+        error = firstAttempt.error
+      }
       if (error) {
         console.error('[Supabase] Insert error:', error)
         throw new Error(error.message || 'Failed to submit complaint to database.')

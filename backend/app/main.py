@@ -1,15 +1,11 @@
 """
 FastAPI application entrypoint.
-
-NOTE: this is starting scaffolding, written because no backend code existed
-yet. When Team 1/2 add their own routers (auth, complaints, assignments),
-register them here the same way the dashboard router is registered below.
 """
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.database import connect_db, disconnect_db
-from app.routers import dashboard, escalations, reports
+from app.routers import dashboard, escalations, reports, auth
 
 app = FastAPI(title="Complaint & Service Request Portal API")
 
@@ -40,6 +36,7 @@ async def on_shutdown():
 app.include_router(dashboard.router)
 app.include_router(reports.router)
 app.include_router(escalations.router)
+app.include_router(auth.router)
 
 
 @app.get("/health")

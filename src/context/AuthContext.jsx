@@ -1,14 +1,19 @@
 import React, { createContext, useContext, useState, useEffect } from 'react'
 import { supabase } from '../supabase'
+import axios from 'axios'
+
+const API_BASE_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
 const AuthContext = createContext(null)
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [session, setSession] = useState(null)
+  const [role, setRole] = useState('student') // 'student' | 'staff' | 'manager' | 'admin'
+  const [userProfile, setUserProfile] = useState(null)
   const [loading, setLoading] = useState(true)
 
-  // Current view: 'login' | 'register' | 'forget-password' | 'verify-otp' | 'reset-password' | 'dashboard'
+  // Current view: 'login' | 'register' | 'forget-password' | 'verify-otp' | 'reset-password' | 'dashboard' | 'register-complaint'
   const [currentView, setCurrentView] = useState('login')
 
   // Auth flow transfer data: { email: '', prn: '', otpType: 'signup' | 'recovery' }
@@ -18,8 +23,26 @@ export function AuthProvider({ children }) {
     otpType: 'signup',
   })
 
-  // Flash notices or banners (e.g., "Password reset successfully. Please sign in.")
+  // Flash notices or banners
   const [notice, setNotice] = useState('')
+
+  // Resolve role from backend using real Supabase database
+  const resolveUserRole = async (email, userId) => {
+    try {
+      const res = await axios.get(`${API_BASE_URL}/api/auth/user-profile`, {
+        params: { email, user_id: userId }
+      })
+      if (res.data?.success) {
+        setRole(res.data.role)
+        setUserProfile(res.data)
+        return res.data.role
+      }
+    } catch (err) {
+      console.warn('[AuthContext] Role lookup fallback:', err)
+    }
+    setRole('student')
+    return 'student'
+  }
 
   /* ── Initialize session on mount and subscribe to changes ── */
   useEffect(() => {
@@ -36,7 +59,12 @@ export function AuthProvider({ children }) {
           if (initialSession) {
             setSession(initialSession)
             setUser(initialSession.user)
-            setCurrentView('dashboard')
+            const resolvedRole = await resolveUserRole(initialSession.user.email, initialSession.user.id)
+            if (resolvedRole === 'student') {
+              setCurrentView('register-complaint')
+            } else {
+              setCurrentView('dashboard')
+            }
           } else {
             setCurrentView('login')
           }
@@ -51,19 +79,27 @@ export function AuthProvider({ children }) {
 
     initSession()
 
-    // Listen for auth events: SIGNED_IN, SIGNED_OUT, PASSWORD_RECOVERY, USER_UPDATED
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((event, newSession) => {
+    // Listen for auth events
+    const { data: { subscription } } = supabase.auth.onAuthStateChange(async (event, newSession) => {
       if (!mounted) return
 
       setSession(newSession)
       setUser(newSession?.user || null)
 
       if (event === 'SIGNED_IN') {
-        // If recovery was just verified, we may want to allow the user to stay on reset-password
-        setCurrentView(prev => (prev === 'reset-password' ? 'reset-password' : 'dashboard'))
+        if (newSession?.user) {
+          const resolvedRole = await resolveUserRole(newSession.user.email, newSession.user.id)
+          if (resolvedRole === 'student') {
+            setCurrentView('register-complaint')
+          } else {
+            setCurrentView('dashboard')
+          }
+        }
       } else if (event === 'PASSWORD_RECOVERY') {
         setCurrentView('reset-password')
       } else if (event === 'SIGNED_OUT') {
+        setRole('student')
+        setUserProfile(null)
         setCurrentView('login')
       }
     })
@@ -97,11 +133,16 @@ export function AuthProvider({ children }) {
 
     setUser(data.user)
     setSession(data.session)
-    setCurrentView('dashboard')
+    const resolvedRole = await resolveUserRole(data.user.email, data.user.id)
+    if (resolvedRole === 'student') {
+      setCurrentView('register-complaint')
+    } else {
+      setCurrentView('dashboard')
+    }
     return data
   }
 
-  // 2. Sign Up (with PRN in options.data metadata)
+  // 2. Sign Up
   const register = async (email, password, prn) => {
     const { data, error } = await supabase.auth.signUp({
       email: email.trim(),
@@ -115,7 +156,6 @@ export function AuthProvider({ children }) {
 
     if (error) throw error
 
-    // Save email & PRN to flow state and transition to OTP verification
     navigateTo('verify-otp', {
       email: email.trim(),
       prn: prn.trim(),
@@ -128,7 +168,6 @@ export function AuthProvider({ children }) {
   // 3. Send Password Reset OTP
   const sendPasswordReset = async (email) => {
     const { data, error } = await supabase.auth.resetPasswordForEmail(email.trim())
-
     if (error) throw error
 
     navigateTo('verify-otp', {
@@ -139,7 +178,7 @@ export function AuthProvider({ children }) {
     return data
   }
 
-  // 4. Verify OTP (Handles both signup and recovery)
+  // 4. Verify OTP
   const verifyOtp = async (token, customEmail = null, customType = null) => {
     const targetEmail = (customEmail || flowData.email || '').trim()
     const targetType = customType || flowData.otpType || 'signup'
@@ -155,9 +194,13 @@ export function AuthProvider({ children }) {
     if (targetType === 'signup') {
       setUser(data.user)
       setSession(data.session)
-      setCurrentView('dashboard')
+      const resolvedRole = await resolveUserRole(data.user.email, data.user.id)
+      if (resolvedRole === 'student') {
+        setCurrentView('register-complaint')
+      } else {
+        setCurrentView('dashboard')
+      }
     } else if (targetType === 'recovery') {
-      // Upon successful recovery OTP verification, route to reset-password
       setCurrentView('reset-password')
     }
 
@@ -183,15 +226,13 @@ export function AuthProvider({ children }) {
     }
   }
 
-  // 6. Reset Password (Update User)
+  // 6. Reset Password
   const resetPassword = async (newPassword) => {
     const { data, error } = await supabase.auth.updateUser({
       password: newPassword,
     })
-
     if (error) throw error
 
-    // Direct back to Login with a success notice
     navigateTo('login', {}, 'Password updated successfully! Please sign in with your new password.')
     return data
   }
@@ -205,6 +246,8 @@ export function AuthProvider({ children }) {
     } finally {
       setUser(null)
       setSession(null)
+      setRole('student')
+      setUserProfile(null)
       navigateTo('login')
     }
   }
@@ -212,6 +255,8 @@ export function AuthProvider({ children }) {
   const value = {
     user,
     session,
+    role,
+    userProfile,
     loading,
     currentView,
     flowData,

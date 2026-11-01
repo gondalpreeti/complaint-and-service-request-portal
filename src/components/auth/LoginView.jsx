@@ -37,7 +37,6 @@ function LoginView() {
     setLoading(true)
     try {
       await login(email, password)
-      // Login successful: AuthContext handles navigation to dashboard
     } catch (err) {
       console.error('[LoginView] Error during sign in:', err)
       setServerError(err.message || 'Invalid email or password. Please try again.')
@@ -58,7 +57,7 @@ function LoginView() {
         </div>
         <h2 className="auth-title">Sign In to CampusCare</h2>
         <p className="auth-subtitle">
-          Enter your student email and password to access the portal.
+          Enter your student or staff college email to access your role dashboard.
         </p>
       </div>
 
@@ -97,25 +96,15 @@ function LoginView() {
               id="login-email"
               type="email"
               className={`form-input ${errors.email ? 'error' : ''}`}
-              placeholder="e.g. student@college.edu"
+              placeholder="e.g. student@college.edu or staff@test.com"
               value={email}
               onChange={(e) => {
                 setEmail(e.target.value)
                 if (errors.email) setErrors((prev) => ({ ...prev, email: '' }))
-                if (serverError) setServerError('')
               }}
               autoComplete="email"
             />
-            {errors.email && (
-              <span className="field-error">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
-                {errors.email}
-              </span>
-            )}
+            {errors.email && <span className="field-error">{errors.email}</span>}
           </div>
 
           {/* Password Field */}
@@ -126,10 +115,10 @@ function LoginView() {
               </label>
               <button
                 type="button"
-                className="forgot-link-btn"
-                onClick={() => navigateTo('forget-password', { email: email.trim() })}
+                className="forgot-password-link"
+                onClick={() => navigateTo('forget-password')}
               >
-                Forgot Password?
+                Forgot password?
               </button>
             </div>
             <div className="password-input-wrapper">
@@ -142,7 +131,6 @@ function LoginView() {
                 onChange={(e) => {
                   setPassword(e.target.value)
                   if (errors.password) setErrors((prev) => ({ ...prev, password: '' }))
-                  if (serverError) setServerError('')
                 }}
                 autoComplete="current-password"
               />
@@ -151,7 +139,6 @@ function LoginView() {
                 className="password-toggle-btn"
                 onClick={() => setShowPassword((prev) => !prev)}
                 title={showPassword ? 'Hide password' : 'Show password'}
-                aria-label={showPassword ? 'Hide password' : 'Show password'}
               >
                 {showPassword ? (
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -166,37 +153,23 @@ function LoginView() {
                 )}
               </button>
             </div>
-            {errors.password && (
-              <span className="field-error">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                  <circle cx="12" cy="12" r="10" />
-                  <line x1="12" y1="8" x2="12" y2="12" />
-                  <line x1="12" y1="16" x2="12.01" y2="16" />
-                </svg>
-                {errors.password}
-              </span>
-            )}
+            {errors.password && <span className="field-error">{errors.password}</span>}
           </div>
         </div>
 
         {/* Submit Button */}
-        <div className="submit-row" style={{ marginTop: '26px' }}>
-          <button
-            type="submit"
-            className="btn-submit"
-            disabled={loading}
-            style={{ width: '100%' }}
-          >
+        <div className="auth-actions">
+          <button type="submit" className="btn-primary" disabled={loading}>
             {loading ? (
               <>
-                <span className="spinner" />
-                <span>Signing In...</span>
+                <span className="btn-spinner" />
+                <span>Signing in...</span>
               </>
             ) : (
               <>
                 <span>Sign In</span>
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                  <path d="M5 12h14" />
+                  <line x1="5" y1="12" x2="19" y2="12" />
                   <path d="M12 5l7 7-7 7" />
                 </svg>
               </>
@@ -217,49 +190,82 @@ function LoginView() {
         </button>
       </div>
 
-      {/* Quick Demo Access Bar */}
+      {/* Direct Role Persona Shortcuts */}
       <div style={{ marginTop: '22px', paddingTop: '16px', borderTop: '1px solid #e2e8f0', textAlign: 'center' }}>
-        <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '10px', fontWeight: '500' }}>Direct Demo &amp; Reviewer Access:</p>
-        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
-          <button
-            type="button"
-            onClick={() => navigateTo('dashboard')}
-            style={{
-              padding: '8px 16px',
-              fontSize: '0.825rem',
-              fontWeight: '600',
-              color: '#1d4ed8',
-              backgroundColor: '#eff6ff',
-              border: '1px solid #bfdbfe',
-              borderRadius: '6px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'background-color 0.2s'
-            }}
-          >
-            📊 View Analytics Dashboard
-          </button>
+        <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '10px', fontWeight: '600' }}>
+          Role-Based Portals (Live Supabase Data):
+        </p>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
           <button
             type="button"
             onClick={() => navigateTo('register-complaint')}
             style={{
-              padding: '8px 16px',
-              fontSize: '0.825rem',
+              padding: '8px 10px',
+              fontSize: '0.78rem',
               fontWeight: '600',
               color: '#047857',
               backgroundColor: '#ecfdf5',
               border: '1px solid #a7f3d0',
               borderRadius: '6px',
               cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              transition: 'background-color 0.2s'
+              textAlign: 'center'
             }}
           >
-            ✍️ File Complaint
+            🎓 Student Portal (File &amp; Status)
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigateTo('dashboard')}
+            style={{
+              padding: '8px 10px',
+              fontSize: '0.78rem',
+              fontWeight: '600',
+              color: '#4338ca',
+              backgroundColor: '#eef2ff',
+              border: '1px solid #c7d2fe',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              textAlign: 'center'
+            }}
+          >
+            🛠️ Staff Operations Console
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigateTo('dashboard')}
+            style={{
+              padding: '8px 10px',
+              fontSize: '0.78rem',
+              fontWeight: '600',
+              color: '#c2410c',
+              backgroundColor: '#fff7ed',
+              border: '1px solid #fed7aa',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              textAlign: 'center'
+            }}
+          >
+            👔 Manager Workload &amp; Approvals
+          </button>
+
+          <button
+            type="button"
+            onClick={() => navigateTo('dashboard')}
+            style={{
+              padding: '8px 10px',
+              fontSize: '0.78rem',
+              fontWeight: '600',
+              color: '#1d4ed8',
+              backgroundColor: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              textAlign: 'center'
+            }}
+          >
+            📊 Admin Analytics &amp; Reports
           </button>
         </div>
       </div>
