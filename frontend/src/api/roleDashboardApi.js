@@ -1,21 +1,38 @@
 import { apiClient } from "./apiClient";
 
-// /me returns the user's profile/role only. Fetch the role-specific
-// dashboard endpoint after resolving the role.
-export async function fetchRoleDashboard() {
-  const meResponse = await apiClient.get("/api/role-dashboard/me");
-  const me = meResponse.data || {};
-  const role = String(me.role || me.role_name || "").trim().toLowerCase().replace(/[\\s-]+/g, "_");
-
+// Fetch role-specific live data directly from PostgreSQL backend
+export async function fetchRoleDashboard(roleOverride) {
   let endpoint;
-  if (["student", "faculty", "student_faculty", "user"].includes(role)) {
-    endpoint = "/api/role-dashboard/student";
-  } else if (["staff", "service_staff"].includes(role)) {
-    endpoint = "/api/role-dashboard/staff";
-  } else if (role === "manager") {
-    endpoint = "/api/role-dashboard/manager";
+  let targetRole = roleOverride;
+
+  if (targetRole) {
+    const norm = String(targetRole).trim().toLowerCase().replace(/[\s-]+/g, "_");
+    if (["student", "faculty", "student_faculty", "user"].includes(norm)) {
+      endpoint = "/api/role-dashboard/student";
+    } else if (["staff", "service_staff"].includes(norm)) {
+      endpoint = "/api/role-dashboard/staff";
+    } else if (norm === "manager") {
+      endpoint = "/api/role-dashboard/manager";
+    } else {
+      endpoint = `/api/role-dashboard/${norm}`;
+    }
   } else {
-    throw new Error(`Unsupported dashboard role: ${role || "unknown"}`);
+    try {
+      const meResponse = await apiClient.get("/api/role-dashboard/me");
+      const me = meResponse.data || {};
+      const role = String(me.role || me.role_name || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      if (["student", "faculty", "student_faculty", "user"].includes(role)) {
+        endpoint = "/api/role-dashboard/student";
+      } else if (["staff", "service_staff"].includes(role)) {
+        endpoint = "/api/role-dashboard/staff";
+      } else if (role === "manager") {
+        endpoint = "/api/role-dashboard/manager";
+      } else {
+        endpoint = "/api/role-dashboard/student";
+      }
+    } catch {
+      endpoint = "/api/role-dashboard/student";
+    }
   }
 
   const response = await apiClient.get(endpoint);

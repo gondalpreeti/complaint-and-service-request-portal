@@ -9,7 +9,11 @@ const AuthContext = createContext(null)
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [session, setSession] = useState(null)
-  const [role, setRole] = useState('student') // 'student' | 'staff' | 'manager' | 'admin'
+  const [role, setRole] = useState(() => localStorage.getItem('user_role') || 'student') // 'student' | 'staff' | 'manager' | 'admin'
+  const [roleId, setRoleId] = useState(() => {
+    const saved = localStorage.getItem('user_role_id')
+    return saved ? Number(saved) : 1
+  })
   const [userProfile, setUserProfile] = useState(null)
   const [loading, setLoading] = useState(true)
 
@@ -33,15 +37,24 @@ export function AuthProvider({ children }) {
         params: { email, user_id: userId }
       })
       if (res.data?.success) {
+        const resolvedRoleId = Number(
+          res.data.role_id || (res.data.role === 'admin' ? 2 : res.data.role === 'manager' ? 3 : res.data.role === 'staff' ? 4 : 1)
+        )
         setRole(res.data.role)
+        setRoleId(resolvedRoleId)
         setUserProfile(res.data)
-        return res.data.role
+        localStorage.setItem('user_role_id', String(resolvedRoleId))
+        localStorage.setItem('user_role', res.data.role)
+        return { role: res.data.role, roleId: resolvedRoleId }
       }
     } catch (err) {
       console.warn('[AuthContext] Role lookup fallback:', err)
     }
     setRole('student')
-    return 'student'
+    setRoleId(1)
+    localStorage.setItem('user_role_id', '1')
+    localStorage.setItem('user_role', 'student')
+    return { role: 'student', roleId: 1 }
   }
 
   /* ── Initialize session on mount and subscribe to changes ── */
@@ -59,8 +72,8 @@ export function AuthProvider({ children }) {
           if (initialSession) {
             setSession(initialSession)
             setUser(initialSession.user)
-            const resolvedRole = await resolveUserRole(initialSession.user.email, initialSession.user.id)
-            if (resolvedRole === 'student') {
+            const { roleId: resolvedRoleId } = await resolveUserRole(initialSession.user.email, initialSession.user.id)
+            if (resolvedRoleId === 1) {
               setCurrentView('register-complaint')
             } else {
               setCurrentView('dashboard')
@@ -88,8 +101,8 @@ export function AuthProvider({ children }) {
 
       if (event === 'SIGNED_IN') {
         if (newSession?.user) {
-          const resolvedRole = await resolveUserRole(newSession.user.email, newSession.user.id)
-          if (resolvedRole === 'student') {
+          const { roleId: resolvedRoleId } = await resolveUserRole(newSession.user.email, newSession.user.id)
+          if (resolvedRoleId === 1) {
             setCurrentView('register-complaint')
           } else {
             setCurrentView('dashboard')
@@ -99,7 +112,10 @@ export function AuthProvider({ children }) {
         setCurrentView('reset-password')
       } else if (event === 'SIGNED_OUT') {
         setRole('student')
+        setRoleId(1)
         setUserProfile(null)
+        localStorage.removeItem('user_role_id')
+        localStorage.removeItem('user_role')
         setCurrentView('login')
       }
     })
@@ -133,8 +149,8 @@ export function AuthProvider({ children }) {
 
     setUser(data.user)
     setSession(data.session)
-    const resolvedRole = await resolveUserRole(data.user.email, data.user.id)
-    if (resolvedRole === 'student') {
+    const { roleId: resolvedRoleId } = await resolveUserRole(data.user.email, data.user.id)
+    if (resolvedRoleId === 1) {
       setCurrentView('register-complaint')
     } else {
       setCurrentView('dashboard')
@@ -194,8 +210,8 @@ export function AuthProvider({ children }) {
     if (targetType === 'signup') {
       setUser(data.user)
       setSession(data.session)
-      const resolvedRole = await resolveUserRole(data.user.email, data.user.id)
-      if (resolvedRole === 'student') {
+      const { roleId: resolvedRoleId } = await resolveUserRole(data.user.email, data.user.id)
+      if (resolvedRoleId === 1) {
         setCurrentView('register-complaint')
       } else {
         setCurrentView('dashboard')
@@ -247,7 +263,10 @@ export function AuthProvider({ children }) {
       setUser(null)
       setSession(null)
       setRole('student')
+      setRoleId(1)
       setUserProfile(null)
+      localStorage.removeItem('user_role_id')
+      localStorage.removeItem('user_role')
       navigateTo('login')
     }
   }
@@ -256,6 +275,8 @@ export function AuthProvider({ children }) {
     user,
     session,
     role,
+    roleId,
+    setRoleId,
     userProfile,
     loading,
     currentView,

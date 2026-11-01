@@ -28,6 +28,7 @@ class UserProfileResponse(BaseModel):
     success: bool
     email: str
     role: str
+    role_id: Optional[int] = 1
     fullname: Optional[str] = ""
     user_id: Optional[str] = ""
     department: Optional[str] = ""
@@ -57,7 +58,7 @@ async def get_user_profile(
     Looks up the real role in Supabase database:
     1. Checks 'public.users' joined with 'public.roles'.
     2. Checks 'public.staff' by email.
-    3. Normalizes to: 'student' | 'staff' | 'manager' | 'admin'.
+    3. Normalizes to: 'student' (role_id 1), 'admin' (role_id 2), 'manager' (role_id 3), 'staff' (role_id 4).
     """
     if not email and not user_id:
         raise HTTPException(status_code=400, detail="email or user_id is required.")
@@ -78,11 +79,14 @@ async def get_user_profile(
             staff_row = cursor.fetchone()
             if staff_row:
                 designation = str(staff_row[4]).lower()
-                role = "manager" if "manager" in designation else "staff"
+                is_mgr = "manager" in designation
+                role = "manager" if is_mgr else "staff"
+                role_id = 3 if is_mgr else 4
                 return UserProfileResponse(
                     success=True,
                     email=staff_row[2],
                     role=role,
+                    role_id=role_id,
                     fullname=staff_row[1],
                     department=staff_row[3],
                     staff_id=staff_row[0]
@@ -91,14 +95,14 @@ async def get_user_profile(
         # 2. Check public.users table joined with roles
         if user_id:
             cursor.execute("""
-                SELECT u.user_id, u.fullname, u.email, r.role_name
+                SELECT u.user_id, u.fullname, u.email, r.role_name, u.role_id
                 FROM users u
                 LEFT JOIN roles r ON r.role_id = u.role_id
                 WHERE u.user_id = %s;
             """, (user_id,))
         else:
             cursor.execute("""
-                SELECT u.user_id, u.fullname, u.email, r.role_name
+                SELECT u.user_id, u.fullname, u.email, r.role_name, u.role_id
                 FROM users u
                 LEFT JOIN roles r ON r.role_id = u.role_id
                 WHERE LOWER(u.email) = LOWER(%s);
@@ -107,20 +111,35 @@ async def get_user_profile(
         u_row = cursor.fetchone()
         if u_row:
             raw_role = str(u_row[3] or "user").strip().lower()
-            role = "student" if raw_role in ("user", "student", "faculty") else raw_role
+            role_id = int(u_row[4]) if u_row[4] is not None else 1
+            if role_id == 2 or raw_role == "admin":
+                role = "admin"
+                role_id = 2
+            elif role_id == 3 or raw_role == "manager":
+                role = "manager"
+                role_id = 3
+            elif role_id == 4 or raw_role == "staff":
+                role = "staff"
+                role_id = 4
+            else:
+                role = "student"
+                role_id = 1
+
             return UserProfileResponse(
                 success=True,
                 email=u_row[2] or (email or ""),
                 role=role,
+                role_id=role_id,
                 fullname=u_row[1] or "",
                 user_id=str(u_row[0]) if u_row[0] else ""
             )
 
-        # Default fallback: student
+        # Default fallback: student (role_id 1)
         return UserProfileResponse(
             success=True,
             email=email or "",
             role="student",
+            role_id=1,
             fullname="",
             user_id=user_id or ""
         )

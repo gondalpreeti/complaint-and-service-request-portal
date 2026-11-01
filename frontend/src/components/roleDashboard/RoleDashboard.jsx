@@ -147,14 +147,8 @@ function Workload({ workload }) {
 
 //export default function RoleDashboard() {
   //const [demoRole, setDemoRole] = useState("student");*/
-  export default function RoleDashboard({ initialRole = "student" }) {
-  //const [demoRole, setDemoRole] = useState(initialRole);
-  //const { data, isLoading, error, refetch } = useRoleDashboardData(demoRole);
-  //const { data, isLoading, error, refetch } = useRoleDashboardData(demoRole, true);
-  //const demoMode = isDashboardDemoMode();
-
-const demoRole = initialRole;
-const { data, isLoading, error, refetch } = useRoleDashboardData(demoRole, true);
+export default function RoleDashboard({ initialRole = "student" }) {
+  const { data, isLoading, error, refetch } = useRoleDashboardData(initialRole);
 
   if (isLoading) return <div className="min-h-screen bg-slate-50 p-6"><div className="mx-auto max-w-7xl animate-pulse space-y-4"><div className="h-8 w-72 rounded bg-slate-200" /><div className="grid grid-cols-2 gap-4 md:grid-cols-4"><div className="h-24 rounded bg-slate-200" /><div className="h-24 rounded bg-slate-200" /><div className="h-24 rounded bg-slate-200" /><div className="h-24 rounded bg-slate-200" /></div></div></div>;
 
@@ -170,17 +164,12 @@ const { data, isLoading, error, refetch } = useRoleDashboardData(demoRole, true)
     <div className="min-h-screen bg-slate-50 p-4 md:p-6">
       <div className="mx-auto max-w-7xl space-y-6">
         <header className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
-          <div><p className="text-xs font-medium uppercase tracking-wide text-blue-600">Complaint & Service Request Portal</p><h1 className="text-2xl font-bold text-slate-900">{data.display_name}</h1><p className="text-sm text-slate-500">Role-based dashboard preview using sample records.</p></div>
+          <div>
+            <p className="text-xs font-medium uppercase tracking-wide text-blue-600">Complaint &amp; Service Request Portal</p>
+            <h1 className="text-2xl font-bold text-slate-900">{data.display_name}</h1>
+            <p className="text-sm text-slate-500">Operational overview and service request tracking.</p>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
-            <span className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs font-semibold text-amber-800">
-  SAMPLE DATA - Backend integration pending
-</span>
-
-
-
-
-
-
             <button onClick={refetch} className="self-start rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50">Refresh</button>
           </div>
         </header>
@@ -203,8 +192,6 @@ const { data, isLoading, error, refetch } = useRoleDashboardData(demoRole, true)
           <Notifications notifications={data.notifications} />
         </div>
         <Workload workload={data.workload} />
-
-        <p className="pb-4 text-xs text-slate-400">Dashboard data is read from the existing portal tables. Complaint/assignment write operations should continue through the project’s complaint/assignment APIs so dashboard code does not duplicate Team 1/2 business logic.</p>
       </div>
     </div>
   );

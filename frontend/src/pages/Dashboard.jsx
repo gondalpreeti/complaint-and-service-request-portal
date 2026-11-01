@@ -39,42 +39,51 @@ function getDashboardRole() {
   }
 }
 
-export default function Dashboard({ onNavigate, onLogout, userEmail } = {}) {
-  const role = getDashboardRole();
+export default function Dashboard({ onNavigate, onLogout, userEmail, roleId, role: propRole, userProfile } = {}) {
+  const jwtRole = getDashboardRole();
+  const actualRoleId = Number(
+    roleId ||
+    localStorage.getItem("user_role_id") ||
+    (propRole === "admin" || jwtRole === "admin" ? 2 : propRole === "manager" || jwtRole === "manager" ? 3 : propRole === "staff" || jwtRole === "staff" ? 4 : 1)
+  );
 
-  // Determine initial tab based on role
-  const getInitialTab = () => {
-    if (["student", "faculty", "user", "student_faculty"].includes(role)) {
-      return "role-dashboard";
-    }
-    if (["staff", "service_staff"].includes(role)) {
-      return "escalations";
-    }
-    if (["manager", "service_staff_manager"].includes(role)) {
-      return "escalations";
-    }
+  const effectiveRoleId = actualRoleId;
+
+  // Initial tab based on effective role
+  const getInitialTab = (rId) => {
+    if (rId === 4) return "escalations";
+    if (rId === 3) return "dashboard";
+    if (rId === 1) return "role-dashboard";
     return "dashboard";
   };
 
-  const [activeTab, setActiveTab] = useState(getInitialTab);
-  const [roleView, setRoleView] = useState(() => {
-    if (["manager", "service_staff_manager"].includes(role)) return "manager";
-    if (["staff", "service_staff"].includes(role)) return "staff";
-    return "student";
-  });
+  const [activeTab, setActiveTab] = useState(() => getInitialTab(effectiveRoleId));
+  const [rolePersona, setRolePersona] = useState("student");
+
+  // Synchronize tab when switching role view
+  useEffect(() => {
+    if (effectiveRoleId === 4) {
+      setActiveTab("escalations");
+    } else if (effectiveRoleId === 3) {
+      if (activeTab === "role-dashboard") setActiveTab("dashboard");
+    }
+  }, [effectiveRoleId]);
+
+  const roleTitle =
+    effectiveRoleId === 3
+      ? "Manager Operations Dashboard"
+      : effectiveRoleId === 4
+      ? "Staff Operations Dashboard"
+      : effectiveRoleId === 1
+      ? "Student & Faculty Care Portal"
+      : "Admin Analytics & Operations Dashboard";
 
   return (
     <div className="min-h-screen bg-slate-50 p-6">
       <header className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">
-            {activeTab === "dashboard"
-              ? "Complaint Analytics Dashboard"
-              : activeTab === "reports"
-              ? "Reports & Analytics"
-              : activeTab === "escalations"
-              ? "Staff & Escalations Console"
-              : `${roleView.charAt(0).toUpperCase() + roleView.slice(1)} Dashboard`}
+          <h1 className="mt-1 text-2xl font-bold text-slate-900">
+            {roleTitle}
           </h1>
           <p className="text-sm text-slate-500">
             CampusCare Management Portal {userEmail ? `• ${userEmail}` : ""}
@@ -82,29 +91,39 @@ export default function Dashboard({ onNavigate, onLogout, userEmail } = {}) {
         </div>
 
         <div className="flex flex-wrap items-center gap-3">
+          {/* Navigation Tabs - Role Filtered */}
           <div className="flex rounded-lg bg-slate-200 p-1">
-            <button
-              type="button"
-              onClick={() => setActiveTab("dashboard")}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                activeTab === "dashboard"
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              📊 Analytics
-            </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("reports")}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                activeTab === "reports"
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              📑 Reports
-            </button>
+            {/* Analytics Tab (Visible to Admin & Manager, Hidden for Staff) */}
+            {effectiveRoleId !== 4 && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("dashboard")}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  activeTab === "dashboard"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                📊 Analytics
+              </button>
+            )}
+
+            {/* Reports Tab (Visible to Admin & Manager, Hidden for Staff) */}
+            {effectiveRoleId !== 4 && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("reports")}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  activeTab === "reports"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                📑 Reports
+              </button>
+            )}
+
+            {/* Escalations & Actions Tab (Visible to All Roles with role-appropriate permissions) */}
             <button
               type="button"
               onClick={() => setActiveTab("escalations")}
@@ -116,28 +135,22 @@ export default function Dashboard({ onNavigate, onLogout, userEmail } = {}) {
             >
               ⚡ Escalations &amp; Actions
             </button>
-            <button
-              type="button"
-              onClick={() => setActiveTab("role-dashboard")}
-              className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
-                activeTab === "role-dashboard"
-                  ? "bg-white text-slate-900 shadow-sm"
-                  : "text-slate-600 hover:text-slate-900"
-              }`}
-            >
-              👤 Role Views
-            </button>
-          </div>
 
-          {onNavigate && (
-            <button
-              type="button"
-              onClick={() => onNavigate("register-complaint")}
-              className="rounded-md bg-blue-600 px-3.5 py-1.5 text-sm font-medium text-white shadow hover:bg-blue-700 transition-colors"
-            >
-              + File Complaint
-            </button>
-          )}
+            {/* Role Views Tab (Visible to Admin role 2 for role-based dashboard viewing) */}
+            {effectiveRoleId === 2 && (
+              <button
+                type="button"
+                onClick={() => setActiveTab("role-dashboard")}
+                className={`rounded-md px-3 py-1.5 text-sm font-medium transition-colors ${
+                  activeTab === "role-dashboard"
+                    ? "bg-white text-slate-900 shadow-sm"
+                    : "text-slate-600 hover:text-slate-900"
+                }`}
+              >
+                👤 Role Views
+              </button>
+            )}
+          </div>
 
           {onLogout && (
             <button
@@ -151,8 +164,8 @@ export default function Dashboard({ onNavigate, onLogout, userEmail } = {}) {
         </div>
       </header>
 
-      {/* Role View Persona Switcher */}
-      {activeTab === "role-dashboard" && (
+      {/* Role View Persona Switcher (Only visible in Role Views tab for Admin) */}
+      {activeTab === "role-dashboard" && effectiveRoleId === 2 && (
         <div className="mb-6 flex items-center gap-3 bg-white p-3 rounded-xl border border-slate-200 shadow-sm">
           <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
             Switch Persona:
@@ -166,9 +179,9 @@ export default function Dashboard({ onNavigate, onLogout, userEmail } = {}) {
               <button
                 key={p.id}
                 type="button"
-                onClick={() => setRoleView(p.id)}
+                onClick={() => setRolePersona(p.id)}
                 className={`px-3 py-1 rounded-md text-xs font-medium transition-colors ${
-                  roleView === p.id
+                  rolePersona === p.id
                     ? "bg-blue-600 text-white"
                     : "bg-slate-100 text-slate-700 hover:bg-slate-200"
                 }`}
@@ -182,11 +195,11 @@ export default function Dashboard({ onNavigate, onLogout, userEmail } = {}) {
 
       {/* Main Tab Content */}
       {activeTab === "escalations" ? (
-        <EscalationConsole />
+        <EscalationConsole roleId={effectiveRoleId} />
       ) : activeTab === "reports" ? (
         <ReportsView />
       ) : activeTab === "role-dashboard" ? (
-        <RoleDashboard key={roleView} initialRole={roleView} />
+        <RoleDashboard key={rolePersona} initialRole={rolePersona} />
       ) : (
         <AnalyticsDashboard />
       )}

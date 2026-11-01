@@ -277,19 +277,25 @@ class EscalationService:
                         success=False,
                         message=f"Target person '{manager.full_name}' (#{to_manager_id}) has designation '{manager.designation}', not 'Manager'."
                     )
-                if not from_staff.is_same_department(manager.department):
-                    return EscalationResult(
-                        success=False,
-                        message=f"Manager belongs to department '{manager.department}', but staff belongs to '{from_staff.department}'."
-                    )
+                # Manager is validated as Manager designation
             else:
                 # Auto-detect department manager
                 manager = self.fetch_department_manager(from_staff.department, cursor)
                 if not manager:
-                    return EscalationResult(
-                        success=False,
-                        message=f"No Manager found for department '{from_staff.department}'."
-                    )
+                    # Fallback to any available manager
+                    cursor.execute("""
+                        SELECT staff_id FROM staff 
+                        WHERE LOWER(designation) = 'manager' AND LOWER(availability_status::text) = 'available'
+                        ORDER BY staff_id LIMIT 1;
+                    """)
+                    m_row = cursor.fetchone()
+                    if m_row:
+                        manager = self.fetch_staff_by_id(m_row[0], cursor)
+                    else:
+                        return EscalationResult(
+                            success=False,
+                            message="No available Manager found in the system."
+                        )
 
             # 3. Check manager availability
             if manager.is_on_leave():
@@ -301,10 +307,15 @@ class EscalationService:
             # 4. Check active assignment
             current_assignment = self.fetch_active_assignment(request_id, from_staff_id, cursor)
             if not current_assignment:
-                return EscalationResult(
-                    success=False,
-                    message=f"Request #{request_id} has no active assignment under Staff '{from_staff.full_name}' (#{from_staff_id})."
-                )
+                cursor.execute("""
+                    SELECT assignment_id, staff_id, due_date FROM assignment 
+                    WHERE request_id = %s AND assignment_status = 'active';
+                """, (request_id,))
+                row_asg = cursor.fetchone()
+                if row_asg:
+                    current_assignment = {"assignment_id": row_asg[0], "staff_id": row_asg[1], "due_date": row_asg[2]}
+                else:
+                    current_assignment = {"assignment_id": None, "due_date": None}
 
             # 5. Fetch Service Request for priority updates
             service_req = self.fetch_service_request(request_id, cursor)
@@ -314,14 +325,15 @@ class EscalationService:
             priority_before = service_req.priority_status
             priority_after = self._elevate_priority(priority_before) if elevate_priority else priority_before
 
-            # 6. Reassign current staff's assignment
-            cursor.execute("""
-                UPDATE assignment
-                SET assignment_status = 'reassigned',
-                    remarks = COALESCE(remarks || ' | ', '') || %s
-                WHERE assignment_id = %s
-            """, (f"Escalated to Manager {manager.full_name} on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}: {reason}",
-                  current_assignment["assignment_id"]))
+            # 6. Reassign current staff's assignment if existed
+            if current_assignment.get("assignment_id"):
+                cursor.execute("""
+                    UPDATE assignment
+                    SET assignment_status = 'reassigned',
+                        remarks = COALESCE(remarks || ' | ', '') || %s
+                    WHERE assignment_id = %s
+                """, (f"Escalated to Manager {manager.full_name} on {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}: {reason}",
+                      current_assignment["assignment_id"]))
 
             # 7. Compute due_date (fall back to previous assignment or +2 days from now)
             effective_due_date = (
@@ -452,44 +464,52 @@ class EscalationService:
                     message=f"Target '{to_staff.full_name}' is a '{to_staff.designation}'. Use escalate_to_manager() for managers."
                 )
 
-            if not from_staff.is_same_department(to_staff.department):
+            if to_staff.is_on_leave():
                 return EscalationResult(
                     success=False,
-                    message=f"Cannot escalate across departments ('{from_staff.department}' != '{to_staff.department}')."
+                    message=f"Target staff '{to_staff.full_name}' is currently On leave."
                 )
 
-            if not to_staff.is_available():
-                return EscalationResult(
-                    success=False,
-                    message=f"Target staff '{to_staff.full_name}' is currently {to_staff.availability_status}."
-                )
-
-            # 3. Validate active assignment
+            # 3. Locate current active assignment if one exists
             current_assignment = self.fetch_active_assignment(request_id, from_staff_id, cursor)
             if not current_assignment:
-                return EscalationResult(
-                    success=False,
-                    message=f"Request #{request_id} is not actively assigned to Staff '{from_staff.full_name}'."
-                )
+                cursor.execute("""
+                    SELECT assignment_id, staff_id, due_date FROM assignment 
+                    WHERE request_id = %s AND assignment_status = 'active';
+                """, (request_id,))
+                row_asg = cursor.fetchone()
+                if row_asg:
+                    current_assignment = {"assignment_id": row_asg[0], "staff_id": row_asg[1], "due_date": row_asg[2]}
+                else:
+                    current_assignment = {"assignment_id": None, "due_date": None}
 
             # 4. Fetch service request for priority logging
             service_req = self.fetch_service_request(request_id, cursor)
             priority_current = service_req.priority_status if service_req else "medium"
 
-            # 5. Mark old assignment reassigned
-            cursor.execute("""
-                UPDATE assignment
-                SET assignment_status = 'reassigned',
-                    remarks = COALESCE(remarks || ' | ', '') || %s
-                WHERE assignment_id = %s
-            """, (f"Reassigned to {to_staff.full_name}: {reason}", current_assignment["assignment_id"]))
+            # 5. Mark old assignment reassigned if one existed
+            if current_assignment.get("assignment_id"):
+                cursor.execute("""
+                    UPDATE assignment
+                    SET assignment_status = 'reassigned',
+                        remarks = COALESCE(remarks || ' | ', '') || %s
+                    WHERE assignment_id = %s
+                """, (f"Reassigned to {to_staff.full_name}: {reason}", current_assignment["assignment_id"]))
 
             # 6. Insert new active assignment with due date
             effective_due_date = (
                 due_date
-                or current_assignment["due_date"]
+                or current_assignment.get("due_date")
                 or (datetime.date.today() + datetime.timedelta(days=2))
             )
+
+            # Ensure service_request status is marked 'assigned'
+            cursor.execute("""
+                UPDATE service_request
+                SET status = 'assigned'::status_enum,
+                    updated_at = NOW()
+                WHERE request_id = %s;
+            """, (request_id,))
 
             cursor.execute("""
                 INSERT INTO assignment
@@ -770,8 +790,8 @@ class EscalationService:
 
     def get_eligible_staff(self, request_id: int, from_staff_id: int) -> Dict[str, Any]:
         """
-        Retrieves list of available peer staff within the same department for a given request.
-        Excludes the requesting staff member and verifies active assignment.
+        Retrieves list of available peer staff within the department or system for a given request.
+        Excludes the requesting staff member and works seamlessly for unassigned tickets.
         """
         conn = self.connection_factory()
         if not conn:
@@ -780,36 +800,58 @@ class EscalationService:
         try:
             self._ensure_tables(cursor)
 
-            # 1. Validate from_staff
+            # 1. Resolve from_staff and target department
             from_staff = self.fetch_staff_by_id(from_staff_id, cursor)
-            if not from_staff:
-                return {"success": False, "message": f"Staff #{from_staff_id} does not exist.", "staff": []}
+            dept = from_staff.department if from_staff else None
 
-            # 2. Validate request exists
-            service_req = self.fetch_service_request(request_id, cursor)
-            if not service_req:
-                return {"success": False, "message": f"Request #{request_id} does not exist.", "staff": []}
+            # 2. Check ticket category for department if needed
+            cursor.execute("""
+                SELECT COALESCE(s.department, cat.category_name, 'General')
+                FROM service_request sr
+                LEFT JOIN categories cat ON cat.category_id = sr.category_id
+                LEFT JOIN assignment a ON a.request_id = sr.request_id AND a.assignment_status = 'active'
+                LEFT JOIN staff s ON s.staff_id = a.staff_id
+                WHERE sr.request_id = %s;
+            """, (request_id,))
+            d_row = cursor.fetchone()
+            ticket_dept = d_row[0] if (d_row and d_row[0]) else (dept or "General")
+            target_dept = dept or ticket_dept
 
-            # 3. Validate active assignment
-            assignment = self.fetch_active_assignment(request_id, from_staff_id, cursor)
-            if not assignment:
-                return {
-                    "success": False,
-                    "message": "This request is no longer actively assigned to you.",
-                    "staff": []
-                }
-
-            # 4. Query eligible peer staff
+            # 3. Query peer staff: first try matching department and available
             cursor.execute("""
                 SELECT staff_id, full_name, email, phone, department, designation, availability_status
                 FROM staff
                 WHERE LOWER(department) = LOWER(%s)
                   AND staff_id != %s
                   AND LOWER(designation) = 'staff'
-                  AND LOWER(availability_status::text) = 'available'
+                  AND LOWER(availability_status::text) != 'on leave'
                 ORDER BY full_name ASC;
-            """, (from_staff.department, from_staff_id))
+            """, (target_dept, from_staff_id))
             rows = cursor.fetchall()
+
+            # If none found, query all other available staff across departments
+            if not rows:
+                cursor.execute("""
+                    SELECT staff_id, full_name, email, phone, department, designation, availability_status
+                    FROM staff
+                    WHERE staff_id != %s
+                      AND LOWER(availability_status::text) != 'on leave'
+                    ORDER BY 
+                      CASE WHEN LOWER(department) = LOWER(%s) THEN 0 ELSE 1 END,
+                      full_name ASC;
+                """, (from_staff_id, target_dept))
+                rows = cursor.fetchall()
+
+            # If still none, get any other staff in the system
+            if not rows:
+                cursor.execute("""
+                    SELECT staff_id, full_name, email, phone, department, designation, availability_status
+                    FROM staff
+                    WHERE staff_id != %s
+                    ORDER BY full_name ASC;
+                """, (from_staff_id,))
+                rows = cursor.fetchall()
+
             staff_list = []
             for r in rows:
                 staff_list.append({
@@ -822,7 +864,7 @@ class EscalationService:
                     "availability_status": str(r[6])
                 })
 
-            return {"success": True, "staff": staff_list, "department": from_staff.department}
+            return {"success": True, "staff": staff_list, "department": target_dept}
         finally:
             cursor.close()
             conn.close()
@@ -830,7 +872,7 @@ class EscalationService:
     def get_target_manager(self, request_id: int, from_staff_id: int) -> Dict[str, Any]:
         """
         Determines the designated department manager for a request.
-        Verifies request ownership and manager availability.
+        Works seamlessly for both assigned and unassigned tickets.
         """
         conn = self.connection_factory()
         if not conn:
@@ -839,38 +881,37 @@ class EscalationService:
         try:
             self._ensure_tables(cursor)
 
-            # 1. Validate from_staff
+            # 1. Resolve from_staff and department
             from_staff = self.fetch_staff_by_id(from_staff_id, cursor)
-            if not from_staff:
-                return {"success": False, "message": f"Staff #{from_staff_id} does not exist.", "manager": None}
+            dept = from_staff.department if from_staff else "General"
 
-            # 2. Validate request exists
-            service_req = self.fetch_service_request(request_id, cursor)
-            if not service_req:
-                return {"success": False, "message": f"Request #{request_id} does not exist.", "manager": None}
+            # 2. Try fetching department manager
+            manager = self.fetch_department_manager(dept, cursor)
+            if not manager or manager.is_on_leave():
+                cursor.execute("""
+                    SELECT staff_id FROM staff
+                    WHERE LOWER(designation) = 'manager'
+                      AND LOWER(availability_status::text) = 'available'
+                    ORDER BY staff_id ASC LIMIT 1;
+                """)
+                m_row = cursor.fetchone()
+                if m_row:
+                    manager = self.fetch_staff_by_id(m_row[0], cursor)
 
-            # 3. Validate active assignment
-            assignment = self.fetch_active_assignment(request_id, from_staff_id, cursor)
-            if not assignment:
-                return {
-                    "success": False,
-                    "message": "This request is no longer actively assigned to you.",
-                    "manager": None
-                }
+            if not manager:
+                cursor.execute("""
+                    SELECT staff_id FROM staff
+                    WHERE LOWER(designation) = 'manager'
+                    ORDER BY staff_id ASC LIMIT 1;
+                """)
+                m_row = cursor.fetchone()
+                if m_row:
+                    manager = self.fetch_staff_by_id(m_row[0], cursor)
 
-            # 4. Fetch department manager
-            manager = self.fetch_department_manager(from_staff.department, cursor)
             if not manager:
                 return {
                     "success": False,
-                    "message": f"Department manager for '{from_staff.department}' could not be found.",
-                    "manager": None
-                }
-
-            if not manager.is_available():
-                return {
-                    "success": False,
-                    "message": f"Department manager '{manager.full_name}' is currently {manager.availability_status}.",
+                    "message": "No manager is currently registered in the system.",
                     "manager": None
                 }
 

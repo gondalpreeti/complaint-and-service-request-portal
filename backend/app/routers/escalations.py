@@ -22,8 +22,13 @@ from fastapi import APIRouter, Depends, HTTPException, Header, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-# Ensure dbconnections directory is on python path (checks repo root or parent workspace)
-for p in (Path(__file__).resolve().parents[3] / "dbconnections", Path(__file__).resolve().parents[4] / "dbconnections"):
+# Ensure dbconnections directory and repository root are on python path
+for p in (
+    Path(__file__).resolve().parents[3],
+    Path(__file__).resolve().parents[3] / "dbconnections",
+    Path(__file__).resolve().parents[4],
+    Path(__file__).resolve().parents[4] / "dbconnections",
+):
     if p.exists() and str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
@@ -405,28 +410,38 @@ async def get_all_active_assignments():
     try:
         cursor.execute("""
             SELECT 
-                a.assignment_id,
-                a.request_id,
+                COALESCE(a.assignment_id, 0) AS assignment_id,
+                sr.request_id,
                 sr.complaint_id,
                 c.subject,
                 c.description,
-                cat.category_name,
+                COALESCE(cat.category_name, 'General') AS category_name,
                 sr.priority_status::text,
                 sr.status::text,
                 a.staff_id,
-                s.full_name AS staff_name,
-                s.designation,
-                s.department,
+                COALESCE(s.full_name, 'Unassigned') AS staff_name,
+                COALESCE(s.designation, 'Unassigned') AS designation,
+                COALESCE(s.department, cat.category_name, 'General') AS department,
                 a.assigned_date::text,
                 a.due_date::text,
-                a.remarks
-            FROM assignment a
-            JOIN service_request sr ON sr.request_id = a.request_id
+                a.remarks,
+                COALESCE(u.fullname, u.email, 'Student') AS submitter_name
+            FROM service_request sr
             JOIN complaints c ON c.complaint_id = sr.complaint_id
+            LEFT JOIN users u ON u.user_id = c.user_id
             LEFT JOIN categories cat ON cat.category_id = sr.category_id
-            JOIN staff s ON s.staff_id = a.staff_id
-            WHERE a.assignment_status = 'active'
-            ORDER BY a.assignment_id DESC;
+            LEFT JOIN assignment a ON a.request_id = sr.request_id AND a.assignment_status = 'active'
+            LEFT JOIN staff s ON s.staff_id = a.staff_id
+            ORDER BY 
+                CASE WHEN a.staff_id IS NULL THEN 0 ELSE 1 END,
+                CASE LOWER(sr.priority_status::text)
+                    WHEN 'critical' THEN 1
+                    WHEN 'high' THEN 2
+                    WHEN 'medium' THEN 3
+                    WHEN 'low' THEN 4
+                    ELSE 5
+                END,
+                sr.request_id DESC;
         """)
         rows = cursor.fetchall()
         return [
@@ -445,7 +460,8 @@ async def get_all_active_assignments():
                 "department": r[11],
                 "assigned_date": r[12][:10] if r[12] else "",
                 "due_date": r[13][:10] if r[13] else "",
-                "remarks": r[14] or ""
+                "remarks": r[14] or "",
+                "submitter_name": r[15] or "Student"
             }
             for r in rows
         ]

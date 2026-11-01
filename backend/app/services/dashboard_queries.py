@@ -65,8 +65,8 @@ async def get_kpi_summary(conn: asyncpg.Connection, filters: DashboardFilters) -
             COUNT(DISTINCT c.complaint_id) AS total_complaints,
             COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(COALESCE(sr.status::text, c.status::text, 'pending')) = 'pending') AS pending,
             COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) = 'assigned') AS assigned,
-            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) = 'in progress') AS in_progress,
-            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) = 'resolved' OR LOWER(c.status::text) = 'resolved') AS resolved,
+            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) IN ('in progress', 'in_progress')) AS in_progress,
+            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) IN ('resolved', 'completed') OR LOWER(c.status::text) = 'resolved') AS resolved,
             COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) = 'closed' OR LOWER(c.status::text) = 'closed') AS closed,
             ROUND(AVG(EXTRACT(EPOCH FROM (c.resolved_at - c.created_at)) / 3600.0)::numeric, 1) AS avg_resolution_time_hours
         FROM complaints c
