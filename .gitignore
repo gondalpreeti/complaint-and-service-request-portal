@@ -7,8 +7,11 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
+# Dependencies and build output
 node_modules
+node_modules/
 dist
+dist/
 dist-ssr
 *.local
 
@@ -25,13 +28,14 @@ dist-ssr
 
 # Environment variables (keep private credentials safe)
 .env
+.env.*
+!.env.example
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
-# Python
+# Python cache
 __pycache__/
 *.py[cod]
 *$py.class
-
