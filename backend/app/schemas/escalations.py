@@ -93,3 +93,27 @@ class EscalationLogEntry(BaseModel):
     escalated_at: str
     from_person: str
     to_person: str
+
+
+class StartProgressRequest(BaseModel):
+    request_id: int
+    notes: Optional[str] = "Staff has commenced work on this request."
+
+
+class ResolveRequest(BaseModel):
+    request_id: int
+    resolution_notes: str = Field(..., min_length=3, description="Details of resolution")
+
+
+class CloseRequest(BaseModel):
+    request_id: int
+    remarks: Optional[str] = "Issue verified and closed."
+
+
+class StatusUpdateResponse(BaseModel):
+    success: bool
+    message: str
+    request_id: int
+    previous_status: str
+    new_status: str
+    details: Optional[Dict[str, Any]] = None

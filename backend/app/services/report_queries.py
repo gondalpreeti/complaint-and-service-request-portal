@@ -27,7 +27,7 @@ def _build_conditions(filters: ReportFilters, start_idx: int = 1) -> tuple[list[
         params.append(filters.date_to)
         idx += 1
     if filters.status:
-        conditions.append(f"LOWER(sr.status::text) = LOWER(${idx}::text)")
+        conditions.append(f"LOWER(COALESCE(sr.status::text, c.status::text, 'pending')) = LOWER(${idx}::text)")
         params.append(filters.status)
         idx += 1
     if filters.category_id:
@@ -35,7 +35,7 @@ def _build_conditions(filters: ReportFilters, start_idx: int = 1) -> tuple[list[
         params.append(filters.category_id)
         idx += 1
     if filters.priority:
-        conditions.append(f"LOWER(sr.priority_status::text) = LOWER(${idx}::text)")
+        conditions.append(f"LOWER(COALESCE(sr.priority_status::text, 'medium')) = LOWER(${idx}::text)")
         params.append(filters.priority)
         idx += 1
     if filters.search:
@@ -53,11 +53,11 @@ async def get_report_kpi_summary(conn: asyncpg.Connection, filters: ReportFilter
     query = f"""
         SELECT
             COUNT(DISTINCT c.complaint_id) AS total_complaints,
-            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(COALESCE(sr.status::text, 'pending')) = 'pending') AS pending,
+            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(COALESCE(sr.status::text, c.status::text, 'pending')) = 'pending') AS pending,
             COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) = 'assigned') AS assigned,
             COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) = 'in progress') AS in_progress,
-            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) = 'resolved') AS resolved,
-            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) = 'closed') AS closed
+            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) = 'resolved' OR LOWER(c.status::text) = 'resolved') AS resolved,
+            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) = 'closed' OR LOWER(c.status::text) = 'closed') AS closed
         FROM complaints c
         LEFT JOIN service_request sr ON sr.complaint_id = c.complaint_id
         {where_sql}
@@ -68,6 +68,18 @@ async def get_report_kpi_summary(conn: asyncpg.Connection, filters: ReportFilter
             row = await conn.fetchrow(query, *params)
         except Exception:
             row = None
+
+    # Query live open escalations count
+    escalated_count = 0
+    async with _DB_OPERATION_LOCK:
+        try:
+            esc_row = await conn.fetchrow("""
+                SELECT COUNT(*) FILTER (WHERE status != 'resolved') AS open_count FROM escalation_logs;
+            """)
+            if esc_row and esc_row["open_count"] is not None:
+                escalated_count = int(esc_row["open_count"])
+        except Exception:
+            escalated_count = 0
 
     if row and row["total_complaints"]:
         total = row["total_complaints"]
@@ -82,7 +94,7 @@ async def get_report_kpi_summary(conn: asyncpg.Connection, filters: ReportFilter
             in_progress=row["in_progress"] or 0,
             resolved=row["resolved"] or 0,
             closed=row["closed"] or 0,
-            escalated=0,
+            escalated=escalated_count,
             resolution_rate_percent=resolution_rate,
             avg_resolution_time_hours=14.5,
             sla_compliance_percent=sla_percent,
@@ -95,7 +107,7 @@ async def get_report_kpi_summary(conn: asyncpg.Connection, filters: ReportFilter
         in_progress=0,
         resolved=0,
         closed=0,
-        escalated=0,
+        escalated=escalated_count,
         resolution_rate_percent=0.0,
         avg_resolution_time_hours=None,
         sla_compliance_percent=100.0,
@@ -113,8 +125,8 @@ async def get_report_category_breakdown(
             cat.category_id, 
             cat.category_name,
             COUNT(DISTINCT c.complaint_id) AS total_count,
-            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(sr.status::text) IN ('resolved', 'closed')) AS resolved_count,
-            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(COALESCE(sr.status::text, 'pending')) IN ('pending', 'assigned', 'in progress')) AS pending_count
+            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(COALESCE(sr.status::text, c.status::text)) IN ('resolved', 'closed')) AS resolved_count,
+            COUNT(DISTINCT c.complaint_id) FILTER (WHERE LOWER(COALESCE(sr.status::text, c.status::text, 'pending')) IN ('pending', 'assigned', 'in progress')) AS pending_count
         FROM categories cat
         LEFT JOIN complaints c ON c.category_id = cat.category_id
         LEFT JOIN service_request sr ON sr.complaint_id = c.complaint_id {extra_join_sql}
@@ -169,7 +181,7 @@ async def get_complaint_table_rows(
             c.complaint_id::text AS complaint_id,
             c.subject,
             COALESCE(cat.category_name, 'General') AS category_name,
-            COALESCE(sr.status::text, 'Pending') AS status,
+            COALESCE(sr.status::text, c.status::text, 'Pending') AS status,
             COALESCE(sr.priority_status::text, 'Medium') AS priority,
             c.created_at::text AS created_at
         FROM complaints c

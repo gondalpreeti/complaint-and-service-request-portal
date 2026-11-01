@@ -106,7 +106,7 @@ function ComplaintForm({ onSuccess }) {
     return Object.keys(e).length === 0 && Object.keys(de).length === 0
   }
 
-  /* ── Submit to Supabase ───────────────────────── */
+  /* ── Submit to Supabase & Auto-Assign ─────────────────── */
   const handleSubmit = async (e) => {
     e.preventDefault()
     if (!validate()) return
@@ -144,23 +144,56 @@ function ComplaintForm({ onSuccess }) {
         }
       }
 
+      // Check current user session
+      let currentUserId = null
+      try {
+        const { data: { user } } = await supabase.auth.getUser()
+        if (user?.id) currentUserId = user.id
+      } catch (uErr) {
+        // guest mode
+      }
+
       // Insert record into Supabase `complaints` table
+      const insertRecord = {
+        subject: title.trim(),
+        description: description.trim(),
+        category_id: categoryId,
+        status: 'Pending',
+        details: categoryPayload,
+        image_url: imageUrl,
+      }
+      if (currentUserId) {
+        insertRecord.user_id = currentUserId
+      }
+
       const { data, error } = await supabase
         .from('complaints')
-        .insert({
-          subject: title.trim(),
-          description: description.trim(),
-          category_id: categoryId,
-          status: 'Pending',
-          details: categoryPayload,
-          image_url: imageUrl,
-        })
+        .insert(insertRecord)
         .select()
         .single()
 
       if (error) {
         console.error('[Supabase] Insert error:', error)
         throw new Error(error.message || 'Failed to submit complaint to database.')
+      }
+
+      // Trigger Automated Round-Robin Staff Assignment
+      if (data?.complaint_id) {
+        try {
+          const apiBase = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+          await fetch(`${apiBase}/api/escalations/assign`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              complaint_id: data.complaint_id,
+              category_id: categoryId,
+              subject: title.trim(),
+              description: description.trim(),
+            })
+          })
+        } catch (assignErr) {
+          console.warn('[Auto-Assign] Background round-robin trigger notice:', assignErr)
+        }
       }
 
       const generatedId = data?.complaint_id
@@ -333,7 +366,7 @@ function ComplaintForm({ onSuccess }) {
             {submitting ? (
               <>
                 <div className="spinner" aria-hidden="true" />
-                Submitting to Database...
+                Submitting &amp; Assigning Staff...
               </>
             ) : (
               <>

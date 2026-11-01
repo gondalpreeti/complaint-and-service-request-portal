@@ -3,6 +3,7 @@ import KPICard from "../components/dashboard/KPICard";
 import DashboardFilters from "../components/dashboard/DashboardFilters";
 import DashboardCharts from "../components/dashboard/DashboardCharts";
 import ReportsView from "../components/reports/ReportsView";
+import EscalationConsole from "../components/escalations/EscalationConsole";
 import { useDashboardData } from "../hooks/useDashboardData";
 
 export default function Dashboard({ onNavigate, onLogout, userEmail } = {}) {
@@ -15,7 +16,11 @@ export default function Dashboard({ onNavigate, onLogout, userEmail } = {}) {
       <header className="mb-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 border-b border-slate-200 pb-4">
         <div>
           <h1 className="text-2xl font-bold text-slate-900">
-            {activeTab === "dashboard" ? "Complaint Dashboard" : "Reports & Analytics"}
+            {activeTab === "dashboard"
+              ? "Complaint Dashboard"
+              : activeTab === "reports"
+              ? "Reports & Analytics"
+              : "Staff & Escalations Console"}
           </h1>
           <p className="text-sm text-slate-500">
             CampusCare Management Portal {userEmail ? `• ${userEmail}` : ""}
@@ -44,7 +49,18 @@ export default function Dashboard({ onNavigate, onLogout, userEmail } = {}) {
                   : "text-slate-600 hover:text-slate-900"
               }`}
             >
-              Reports & Analytics
+              Reports &amp; Analytics
+            </button>
+            <button
+              type="button"
+              onClick={() => setActiveTab("escalations")}
+              className={`rounded-md px-3 py-1.5 text-sm font-semibold transition-colors flex items-center gap-1.5 ${
+                activeTab === "escalations"
+                  ? "bg-indigo-600 text-white shadow-sm"
+                  : "text-indigo-900 hover:text-indigo-700 bg-indigo-50"
+              }`}
+            >
+              ⚡ Escalations &amp; Actions
             </button>
           </div>
 
@@ -70,7 +86,9 @@ export default function Dashboard({ onNavigate, onLogout, userEmail } = {}) {
         </div>
       </header>
 
-      {activeTab === "reports" ? (
+      {activeTab === "escalations" ? (
+        <EscalationConsole />
+      ) : activeTab === "reports" ? (
         <ReportsView />
       ) : (
         <>

@@ -216,6 +216,53 @@ function LoginView() {
           Register Now
         </button>
       </div>
+
+      {/* Quick Demo Access Bar */}
+      <div style={{ marginTop: '22px', paddingTop: '16px', borderTop: '1px solid #e2e8f0', textAlign: 'center' }}>
+        <p style={{ fontSize: '0.8rem', color: '#64748b', marginBottom: '10px', fontWeight: '500' }}>Direct Demo &amp; Reviewer Access:</p>
+        <div style={{ display: 'flex', gap: '10px', justifyContent: 'center' }}>
+          <button
+            type="button"
+            onClick={() => navigateTo('dashboard')}
+            style={{
+              padding: '8px 16px',
+              fontSize: '0.825rem',
+              fontWeight: '600',
+              color: '#1d4ed8',
+              backgroundColor: '#eff6ff',
+              border: '1px solid #bfdbfe',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'background-color 0.2s'
+            }}
+          >
+            📊 View Analytics Dashboard
+          </button>
+          <button
+            type="button"
+            onClick={() => navigateTo('register-complaint')}
+            style={{
+              padding: '8px 16px',
+              fontSize: '0.825rem',
+              fontWeight: '600',
+              color: '#047857',
+              backgroundColor: '#ecfdf5',
+              border: '1px solid #a7f3d0',
+              borderRadius: '6px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              transition: 'background-color 0.2s'
+            }}
+          >
+            ✍️ File Complaint
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

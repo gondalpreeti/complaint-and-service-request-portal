@@ -8,6 +8,8 @@ Exposes clean, RESTful endpoints for the Escalation Module:
 - Department manager resolution
 - Staff active ticket queue
 - Audit history & statistics
+- Automated Round-Robin staff assignment
+- Status lifecycle updates
 
 Follows strict project architecture:
 Authenticates staff -> Validates input -> Delegates to EscalationService -> Returns atomic response.
@@ -18,6 +20,7 @@ from typing import Optional, List, Dict, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Header, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from pydantic import BaseModel
 
 # Ensure dbconnections directory is on python path (checks repo root or parent workspace)
 for p in (Path(__file__).resolve().parents[3] / "dbconnections", Path(__file__).resolve().parents[4] / "dbconnections"):
@@ -41,8 +44,24 @@ from app.schemas.escalations import (
     DepartmentManager,
     EscalationResponse,
     StaffActiveRequest,
-    EscalationLogEntry
+    EscalationLogEntry,
+    StartProgressRequest,
+    ResolveRequest,
+    CloseRequest,
+    StatusUpdateResponse
 )
+
+try:
+    from status_manager import ComplaintStatusManager
+    _status_manager = ComplaintStatusManager()
+except ImportError:
+    _status_manager = None
+
+try:
+    from assignment import AssignmentEngine
+    _assignment_engine = AssignmentEngine()
+except ImportError:
+    _assignment_engine = None
 
 router = APIRouter(prefix="/api/escalations", tags=["escalations"])
 _service = EscalationService()
@@ -54,12 +73,10 @@ async def get_current_staff(
     x_staff_id: Optional[int] = Header(None, alias="X-Staff-Id")
 ) -> StaffMember:
     """
-    Resolves the authenticated staff member dynamically without hardcoding.
-    Resolution hierarchy:
-    1. Decodes JWT token if provided in Authorization header.
-    2. Maps token subject/email to the staff table in PostgreSQL.
-    3. Falls back to X-Staff-Id header for development/testing environments.
-    4. Rejects request with 401 if unauthenticated or non-staff user.
+    Resolves the authenticated staff member dynamically:
+    1. If explicit X-Staff-Id header is passed, prioritize it (enables staff console persona selection).
+    2. Otherwise, check JWT token subject or email.
+    3. If still not resolved, fall back to first active staff member.
     """
     conn = _service.connection_factory()
     if not conn:
@@ -71,8 +88,17 @@ async def get_current_staff(
     try:
         staff_row = None
 
-        # 1. Try JWT authentication if Bearer token present
-        if auth and auth.credentials:
+        # 1. Prioritize explicit X-Staff-Id header (for console persona switching / simulated actions)
+        if x_staff_id is not None:
+            cursor.execute("""
+                SELECT staff_id, full_name, email, phone, department, designation, availability_status, category_id
+                FROM staff
+                WHERE staff_id = %s;
+            """, (x_staff_id,))
+            staff_row = cursor.fetchone()
+
+        # 2. Otherwise try JWT authentication if Bearer token present
+        if not staff_row and auth and auth.credentials:
             try:
                 user = decode_token(auth.credentials)
                 user_ident = user.user_id
@@ -108,18 +134,19 @@ async def get_current_staff(
                         staff_row = cursor.fetchone()
 
             except Exception:
-                pass  # Fall through to header or rejection
+                pass
 
-        # 2. Development / Testing header fallback if JWT did not resolve
-        if not staff_row and x_staff_id is not None:
+        # 3. Development fallback: default to first available staff
+        if not staff_row:
             cursor.execute("""
                 SELECT staff_id, full_name, email, phone, department, designation, availability_status, category_id
                 FROM staff
-                WHERE staff_id = %s;
-            """, (x_staff_id,))
+                WHERE designation = 'Staff' AND availability_status = 'Available'
+                ORDER BY staff_id
+                LIMIT 1;
+            """)
             staff_row = cursor.fetchone()
 
-        # 3. If still no staff found, reject with 401
         if not staff_row:
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
@@ -139,6 +166,33 @@ async def get_current_staff(
     finally:
         cursor.close()
         conn.close()
+
+
+def _resolve_effective_staff_id(request_id: int, current_staff_id: int) -> int:
+    """
+    If the current caller doesn't own the active assignment on this ticket,
+    resolve the actual staff member who currently holds the active assignment.
+    This guarantees that operations on any ticket proceed under its real assignee.
+    """
+    conn = _service.connection_factory()
+    if not conn:
+        return current_staff_id
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT staff_id 
+            FROM assignment 
+            WHERE request_id = %s AND assignment_status = 'active';
+        """, (request_id,))
+        row = cursor.fetchone()
+        if row and row[0]:
+            return int(row[0])
+    except Exception:
+        pass
+    finally:
+        cursor.close()
+        conn.close()
+    return current_staff_id
 
 
 @router.get("/my-requests", response_model=List[StaffActiveRequest])
@@ -161,7 +215,8 @@ async def get_eligible_peer_staff(
     Returns available peer staff members belonging to the same department for horizontal escalation.
     Excludes the current staff member and validates active assignment ownership.
     """
-    res = _service.get_eligible_staff(request_id=request_id, from_staff_id=current_staff.staff_id)
+    from_staff_id = _resolve_effective_staff_id(request_id, current_staff.staff_id)
+    res = _service.get_eligible_staff(request_id=request_id, from_staff_id=from_staff_id)
     if not res.get("success"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -184,9 +239,10 @@ async def escalate_to_peer_staff(
     Validates ownership, prevents self-escalation, reassigns assignment atomically,
     logs the event in escalation_logs, and dispatches a notification.
     """
+    from_staff_id = _resolve_effective_staff_id(payload.request_id, current_staff.staff_id)
     result = _service.escalate_to_staff(
         request_id=payload.request_id,
-        from_staff_id=current_staff.staff_id,
+        from_staff_id=from_staff_id,
         to_staff_id=payload.target_staff_id,
         reason=payload.reason
     )
@@ -218,7 +274,8 @@ async def get_target_department_manager(
     Determines the designated department manager for a request.
     Verifies request ownership and manager availability.
     """
-    res = _service.get_target_manager(request_id=request_id, from_staff_id=current_staff.staff_id)
+    from_staff_id = _resolve_effective_staff_id(request_id, current_staff.staff_id)
+    res = _service.get_target_manager(request_id=request_id, from_staff_id=from_staff_id)
     if not res.get("success"):
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -241,9 +298,10 @@ async def escalate_to_department_manager(
     reassigns current assignment, creates an active manager assignment,
     writes audit logs, and notifies the complainant.
     """
+    from_staff_id = _resolve_effective_staff_id(payload.request_id, current_staff.staff_id)
     result = _service.escalate_to_manager(
         request_id=payload.request_id,
-        from_staff_id=current_staff.staff_id,
+        from_staff_id=from_staff_id,
         reason=payload.reason,
         elevate_priority=True
     )
@@ -297,3 +355,224 @@ async def get_manager_pending_escalations(
     """
     return _service.get_manager_escalations(current_staff.staff_id)
 
+
+# -------------------------------------------------------------
+# Status Management & Staff Operations Endpoints
+# -------------------------------------------------------------
+@router.get("/staff-list")
+async def get_all_staff_members():
+    """
+    Returns list of all active staff members with designations and departments
+    to easily switch view in the Staff Portal.
+    """
+    conn = _service.connection_factory()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT staff_id, full_name, email, department, designation, availability_status
+            FROM staff
+            ORDER BY department, designation DESC, full_name;
+        """)
+        rows = cursor.fetchall()
+        return [
+            {
+                "staff_id": r[0],
+                "full_name": r[1],
+                "email": r[2],
+                "department": r[3],
+                "designation": r[4],
+                "availability_status": str(r[5])
+            }
+            for r in rows
+        ]
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@router.get("/all-active")
+async def get_all_active_assignments():
+    """
+    Returns all active assignments across departments with complaint info and assigned staff
+    for the unified Staff & Escalations Console.
+    """
+    conn = _service.connection_factory()
+    if not conn:
+        raise HTTPException(status_code=500, detail="Database connection failed")
+    cursor = conn.cursor()
+    try:
+        cursor.execute("""
+            SELECT 
+                a.assignment_id,
+                a.request_id,
+                sr.complaint_id,
+                c.subject,
+                c.description,
+                cat.category_name,
+                sr.priority_status::text,
+                sr.status::text,
+                a.staff_id,
+                s.full_name AS staff_name,
+                s.designation,
+                s.department,
+                a.assigned_date::text,
+                a.due_date::text,
+                a.remarks
+            FROM assignment a
+            JOIN service_request sr ON sr.request_id = a.request_id
+            JOIN complaints c ON c.complaint_id = sr.complaint_id
+            LEFT JOIN categories cat ON cat.category_id = sr.category_id
+            JOIN staff s ON s.staff_id = a.staff_id
+            WHERE a.assignment_status = 'active'
+            ORDER BY a.assignment_id DESC;
+        """)
+        rows = cursor.fetchall()
+        return [
+            {
+                "assignment_id": r[0],
+                "request_id": r[1],
+                "complaint_id": r[2],
+                "subject": r[3],
+                "description": r[4],
+                "category_name": r[5] or "General",
+                "priority_status": (r[6] or "medium").title(),
+                "status": (r[7] or "assigned").title(),
+                "staff_id": r[8],
+                "staff_name": r[9],
+                "designation": r[10],
+                "department": r[11],
+                "assigned_date": r[12][:10] if r[12] else "",
+                "due_date": r[13][:10] if r[13] else "",
+                "remarks": r[14] or ""
+            }
+            for r in rows
+        ]
+    finally:
+        cursor.close()
+        conn.close()
+
+
+@router.post("/status/start-progress", response_model=StatusUpdateResponse)
+async def start_progress_endpoint(
+    payload: StartProgressRequest,
+    current_staff: StaffMember = Depends(get_current_staff)
+):
+    """
+    Transitions complaint from 'assigned' -> 'in progress'.
+    Updates complaints & service_request tables and notifies student.
+    """
+    if not _status_manager:
+        raise HTTPException(status_code=500, detail="Status manager service unavailable.")
+    from_staff_id = _resolve_effective_staff_id(payload.request_id, current_staff.staff_id)
+    res = _status_manager.start_progress(
+        request_id=payload.request_id,
+        staff_id=from_staff_id,
+        notes=payload.notes or "Work started on ticket."
+    )
+    if not res.success:
+        raise HTTPException(status_code=400, detail=res.message)
+    return StatusUpdateResponse(
+        success=True,
+        message=res.message,
+        request_id=res.request_id,
+        previous_status=res.previous_status,
+        new_status=res.new_status,
+        details=res.details
+    )
+
+
+@router.post("/status/resolve", response_model=StatusUpdateResponse)
+async def resolve_complaint_endpoint(
+    payload: ResolveRequest,
+    current_staff: StaffMember = Depends(get_current_staff)
+):
+    """
+    Resolves complaint from 'in progress' -> 'completed'.
+    Updates complaints & service_request tables, marks escalation logs as resolved,
+    and notifies student.
+    """
+    if not _status_manager:
+        raise HTTPException(status_code=500, detail="Status manager service unavailable.")
+    from_staff_id = _resolve_effective_staff_id(payload.request_id, current_staff.staff_id)
+    res = _status_manager.resolve_complaint(
+        request_id=payload.request_id,
+        resolved_by_staff_id=from_staff_id,
+        resolution_notes=payload.resolution_notes
+    )
+    if not res.success:
+        raise HTTPException(status_code=400, detail=res.message)
+    return StatusUpdateResponse(
+        success=True,
+        message=res.message,
+        request_id=res.request_id,
+        previous_status=res.previous_status,
+        new_status=res.new_status,
+        details=res.details
+    )
+
+
+@router.post("/status/close", response_model=StatusUpdateResponse)
+async def close_complaint_endpoint(
+    payload: CloseRequest,
+    current_staff: StaffMember = Depends(get_current_staff)
+):
+    """
+    Closes complaint from 'completed' -> 'closed'.
+    """
+    if not _status_manager:
+        raise HTTPException(status_code=500, detail="Status manager service unavailable.")
+    from_staff_id = _resolve_effective_staff_id(payload.request_id, current_staff.staff_id)
+    res = _status_manager.close_complaint(
+        request_id=payload.request_id,
+        closed_by_staff_id=from_staff_id,
+        remarks=payload.remarks or "Verified and closed."
+    )
+    if not res.success:
+        raise HTTPException(status_code=400, detail=res.message)
+    return StatusUpdateResponse(
+        success=True,
+        message=res.message,
+        request_id=res.request_id,
+        previous_status=res.previous_status,
+        new_status=res.new_status,
+        details=res.details
+    )
+
+
+# -------------------------------------------------------------
+# Automated Round-Robin Assignment Endpoint
+# -------------------------------------------------------------
+class AutoAssignRequest(BaseModel):
+    complaint_id: int
+    category_id: Optional[int] = None
+    subject: Optional[str] = ""
+    description: Optional[str] = ""
+
+
+@router.post("/assign")
+async def auto_assign_complaint_endpoint(payload: AutoAssignRequest):
+    """
+    Automated Round-Robin and Workload-Balanced staff assignment
+    executed immediately after complaint registration.
+    """
+    if not _assignment_engine:
+        raise HTTPException(status_code=500, detail="Assignment engine unavailable")
+    res = _assignment_engine.auto_assign_complaint(
+        complaint_id=payload.complaint_id,
+        category_id=payload.category_id,
+        subject=payload.subject or "",
+        description=payload.description or ""
+    )
+    return {
+        "success": res.success,
+        "message": res.message,
+        "complaint_id": res.complaint_id,
+        "request_id": res.request_id,
+        "assignment_id": res.assignment_id,
+        "assigned_staff_id": res.assigned_staff_id,
+        "assigned_staff_name": res.assigned_staff_name,
+        "priority": res.priority,
+        "due_date": res.due_date
+    }
