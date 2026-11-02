@@ -45,6 +45,15 @@ export function AuthProvider({ children }) {
         setUserProfile(res.data)
         localStorage.setItem('user_role_id', String(resolvedRoleId))
         localStorage.setItem('user_role', res.data.role)
+        if (res.data.department) {
+          localStorage.setItem('user_department', res.data.department)
+        }
+        if (res.data.staff_id) {
+          localStorage.setItem('user_staff_id', String(res.data.staff_id))
+        }
+        if (res.data.email) {
+          localStorage.setItem('user_email', res.data.email)
+        }
         return { role: res.data.role, roleId: resolvedRoleId }
       }
     } catch (err) {
@@ -54,6 +63,8 @@ export function AuthProvider({ children }) {
     setRoleId(1)
     localStorage.setItem('user_role_id', '1')
     localStorage.setItem('user_role', 'student')
+    localStorage.removeItem('user_department')
+    localStorage.removeItem('user_staff_id')
     return { role: 'student', roleId: 1 }
   }
 

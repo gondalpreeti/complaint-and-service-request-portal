@@ -5,7 +5,58 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const DEV_TOKEN =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwicm9sZSI6ImFkbWluIiwiZXhwIjo0MTAyNDQ0ODAwfQ.TkQTz9gu_19StaUCkk7pSuaDFaeQlI2M_71poqx4iNk";
 
-export default function EscalationConsole({ roleId } = {}) {
+export const isCategoryMatchingDepartment = (
+  categoryName = "",
+  categoryId = null,
+  department = "",
+  staffCategoryId = null
+) => {
+  if (staffCategoryId && categoryId && Number(staffCategoryId) === Number(categoryId)) {
+    return true;
+  }
+  const dept = (department || "").toLowerCase().trim();
+  const cat = (categoryName || "").toLowerCase().trim();
+  if (!dept) return true;
+
+  if (cat === dept) return true;
+  if (cat.includes(dept) || dept.includes(cat)) return true;
+
+  // Department-specific mappings
+  if (dept === "infrastructure" && (cat.includes("infra") || cat.includes("electrical") || Number(categoryId) === 8)) {
+    return true;
+  }
+  if (dept === "it" && (cat === "it" || cat.includes("information technology") || Number(categoryId) === 9)) {
+    return true;
+  }
+  if ((dept.includes("plumb") || dept.includes("clean")) && (cat.includes("plumb") || cat.includes("clean") || Number(categoryId) === 6)) {
+    return true;
+  }
+  if (dept.includes("hostel") && (cat.includes("hostel") || Number(categoryId) === 5)) {
+    return true;
+  }
+  if (dept.includes("library") && (cat.includes("library") || Number(categoryId) === 4)) {
+    return true;
+  }
+  if (dept.includes("exam") && (cat.includes("exam") || Number(categoryId) === 3)) {
+    return true;
+  }
+  if (dept.includes("account") && (cat.includes("account") || Number(categoryId) === 1)) {
+    return true;
+  }
+  if (dept.includes("admiss") && (cat.includes("admiss") || Number(categoryId) === 2)) {
+    return true;
+  }
+  if (dept.includes("canteen") && (cat.includes("canteen") || Number(categoryId) === 7)) {
+    return true;
+  }
+  if (dept.includes("other") && (cat.includes("other") || Number(categoryId) === 10)) {
+    return true;
+  }
+
+  return false;
+};
+
+export default function EscalationConsole({ roleId, userProfile, userEmail } = {}) {
   const effectiveRoleId = Number(roleId || localStorage.getItem("user_role_id") || 2);
   const [staffList, setStaffList] = useState([]);
   const [selectedStaffId, setSelectedStaffId] = useState(2); // Default Priya Patil
@@ -30,20 +81,56 @@ export default function EscalationConsole({ roleId } = {}) {
   const [historyModal, setHistoryModal] = useState(null); // ticket
   const [auditLogs, setAuditLogs] = useState([]);
 
-  // Dynamic categories extracted from tickets
+  const currentStaff = staffList.find((s) => s.staff_id === Number(selectedStaffId)) || {
+    staff_id: selectedStaffId,
+    full_name: "Active Staff",
+    designation: "Staff",
+    department: userProfile?.department || localStorage.getItem("user_department") || "Operations",
+    category_id: null,
+  };
+
+  const activeDepartment = currentStaff.department || userProfile?.department || localStorage.getItem("user_department") || "";
+  const activeCategoryId = currentStaff.category_id;
+
+  // Filter staff dropdown for staff role if user has a assigned department
+  const displayedStaffList = React.useMemo(() => {
+    if (effectiveRoleId !== 4) return staffList;
+    const fixedDept = (userProfile?.department || localStorage.getItem("user_department") || "").toLowerCase().trim();
+    if (!fixedDept) return staffList;
+    const sameDept = staffList.filter(
+      (s) => (s.department || "").toLowerCase().trim() === fixedDept
+    );
+    return sameDept.length > 0 ? sameDept : staffList;
+  }, [staffList, effectiveRoleId, userProfile]);
+
+  // Dynamic categories extracted from tickets (scoped by department for staff)
   const categories = React.useMemo(() => {
     const cats = new Set();
-    tickets.forEach((t) => {
+    const source = effectiveRoleId === 4 && activeDepartment
+      ? tickets.filter((t) =>
+          isCategoryMatchingDepartment(t.category_name, t.category_id, activeDepartment, activeCategoryId)
+        )
+      : tickets;
+
+    source.forEach((t) => {
       if (t.category_name) cats.add(t.category_name);
     });
     return ["all", ...Array.from(cats).sort()];
-  }, [tickets]);
+  }, [tickets, effectiveRoleId, activeDepartment, activeCategoryId]);
 
   // Filtered and sorted tickets
   // Requirement: In the escalations and actions tab, put sorting according to critical.
-  // critical priorities have top most priority then high, medium, then low. also unassigned should show first.
+  // Critical priorities have top most priority then high, medium, then low. Unassigned show first.
+  // For staff (role id = 4): strictly show only complaints of the category related to the staff department.
   const filteredTickets = React.useMemo(() => {
     let list = [...tickets];
+
+    // Staff department category scoping
+    if (effectiveRoleId === 4 && activeDepartment) {
+      list = list.filter((t) =>
+        isCategoryMatchingDepartment(t.category_name, t.category_id, activeDepartment, activeCategoryId)
+      );
+    }
 
     // 1. Priority filter
     if (filterPriority !== "all") {
@@ -102,7 +189,7 @@ export default function EscalationConsole({ roleId } = {}) {
     });
 
     return list;
-  }, [tickets, filterPriority, filterStatus, filterCategory, searchName]);
+  }, [tickets, filterPriority, filterStatus, filterCategory, searchName, effectiveRoleId, activeDepartment, activeCategoryId]);
 
   // Fetch staff list on mount
   useEffect(() => {
@@ -112,7 +199,26 @@ export default function EscalationConsole({ roleId } = {}) {
           headers: { Authorization: `Bearer ${DEV_TOKEN}` },
         });
         setStaffList(res.data);
-        if (res.data.length > 0 && !selectedStaffId) {
+
+        // Auto-match logged in staff by staff_id, email, or department
+        const targetStaffId = userProfile?.staff_id || localStorage.getItem("user_staff_id");
+        const targetEmail = (userProfile?.email || userEmail || localStorage.getItem("user_email") || "").toLowerCase().trim();
+        const targetDept = (userProfile?.department || localStorage.getItem("user_department") || "").toLowerCase().trim();
+
+        let matched = null;
+        if (targetStaffId) {
+          matched = res.data.find((s) => s.staff_id === Number(targetStaffId));
+        }
+        if (!matched && targetEmail) {
+          matched = res.data.find((s) => s.email && s.email.toLowerCase().trim() === targetEmail);
+        }
+        if (!matched && targetDept && effectiveRoleId === 4) {
+          matched = res.data.find((s) => (s.department || "").toLowerCase().trim() === targetDept);
+        }
+
+        if (matched) {
+          setSelectedStaffId(matched.staff_id);
+        } else if (res.data.length > 0 && !selectedStaffId) {
           setSelectedStaffId(res.data[0].staff_id);
         }
       } catch (err) {
@@ -120,7 +226,7 @@ export default function EscalationConsole({ roleId } = {}) {
       }
     }
     loadStaff();
-  }, []);
+  }, [userProfile, userEmail, effectiveRoleId]);
 
   // Fetch active tickets when selected staff changes
   const loadTickets = async () => {
@@ -128,6 +234,11 @@ export default function EscalationConsole({ roleId } = {}) {
     setFeedback(null);
     try {
       const res = await axios.get(`${API_BASE_URL}/api/escalations/all-active`, {
+        params: {
+          role_id: effectiveRoleId,
+          staff_id: selectedStaffId,
+          ...(effectiveRoleId === 4 && activeDepartment ? { department: activeDepartment, category_id: activeCategoryId } : {}),
+        },
         headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": selectedStaffId },
       });
       setTickets(res.data);
@@ -141,14 +252,7 @@ export default function EscalationConsole({ roleId } = {}) {
 
   useEffect(() => {
     loadTickets();
-  }, [selectedStaffId]);
-
-  const currentStaff = staffList.find((s) => s.staff_id === Number(selectedStaffId)) || {
-    staff_id: selectedStaffId,
-    full_name: "Active Staff",
-    designation: "Staff",
-    department: "Operations",
-  };
+  }, [selectedStaffId, effectiveRoleId, activeDepartment, activeCategoryId]);
 
   // 1. Action: Start Progress
   const handleStartProgress = async (ticket) => {
@@ -323,18 +427,23 @@ export default function EscalationConsole({ roleId } = {}) {
             onChange={(e) => setSelectedStaffId(Number(e.target.value))}
             className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
           >
-            {staffList.map((s) => (
+            {displayedStaffList.map((s) => (
               <option key={s.staff_id} value={s.staff_id}>
                 {s.full_name} ({s.designation} - {s.department})
               </option>
             ))}
           </select>
         </div>
-        <div className="flex items-center gap-2 text-xs text-slate-500">
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
           <span>Dept: <strong className="text-slate-700">{currentStaff.department}</strong></span>
           <span className="rounded bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 border border-indigo-100">
             {currentStaff.designation}
           </span>
+          {effectiveRoleId === 4 && (
+            <span className="rounded bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-200">
+              Department Scoped: {currentStaff.department}
+            </span>
+          )}
         </div>
       </div>
 
@@ -358,9 +467,13 @@ export default function EscalationConsole({ roleId } = {}) {
       <div className="rounded-xl bg-white p-6 shadow-sm border border-slate-200">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
           <div>
-            <h3 className="text-base font-bold text-slate-900">Active Service Request Queue</h3>
+            <h3 className="text-base font-bold text-slate-900">
+              Active Service Request Queue {effectiveRoleId === 4 && `(${currentStaff.department} Department)`}
+            </h3>
             <p className="text-xs text-slate-500">
-              Showing tickets sorted by priority (Critical first, Unassigned at top) with multi-criteria filtering.
+              {effectiveRoleId === 4
+                ? `Showing only ${currentStaff.department} category complaints, sorted by priority (Critical first, Unassigned at top).`
+                : "Showing tickets sorted by priority (Critical first, Unassigned at top) with multi-criteria filtering."}
             </p>
           </div>
           <button

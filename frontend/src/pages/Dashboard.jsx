@@ -165,7 +165,11 @@ export default function Dashboard({ onNavigate, onLogout, userEmail, roleId, rol
 
       {/* Main Tab Content */}
       {activeTab === "escalations" ? (
-        <EscalationConsole roleId={effectiveRoleId} />
+        <EscalationConsole
+          roleId={effectiveRoleId}
+          userProfile={userProfile}
+          userEmail={userEmail}
+        />
       ) : activeTab === "reports" ? (
         <ReportsView />
       ) : activeTab === "role-dashboard" ? (

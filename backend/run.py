@@ -31,7 +31,7 @@ if _missing:
 if __name__ == "__main__":
     import uvicorn
 
-    reload_flag = os.environ.get("RELOAD", "false").lower() in ("true", "1")
+    reload_flag = os.environ.get("RELOAD", "true").lower() in ("true", "1")
     uvicorn.run(
         "app.main:app",
         host="0.0.0.0",
