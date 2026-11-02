@@ -312,59 +312,29 @@ export default function EscalationConsole({ roleId } = {}) {
 
   return (
     <div className="space-y-6">
-      {/* Top Banner & Profile Switcher */}
-      <div className="rounded-xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-6 text-white shadow-md">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="rounded bg-indigo-500/20 px-2 py-0.5 text-xs font-semibold text-indigo-300 border border-indigo-500/30">
-                {effectiveRoleId === 3
-                  ? "Manager Escalations & Oversight"
-                  : effectiveRoleId === 4
-                  ? "Staff Operations & Triage"
-                  : "Escalations & Resolution System"}
-              </span>
-              <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-300 border border-emerald-500/30">
-                Active
-              </span>
-            </div>
-            <h2 className="mt-2 text-xl font-bold tracking-tight">
-              {effectiveRoleId === 3
-                ? "Manager Escalation & Approval Console"
-                : effectiveRoleId === 4
-                ? "Staff Service Request & Escalation Console"
-                : "Staff & Escalation Operations Console"}
-            </h2>
-            <p className="mt-1 text-xs text-slate-300">
-              {effectiveRoleId === 3
-                ? "Review and resolve escalated service requests, assign peer staff, and monitor SLA audit logs."
-                : "Directly perform staff workflow actions: Start progress, trigger peer staff or vertical escalations, resolve tickets, and inspect audit logs."}
-            </p>
-          </div>
-
-          {/* Active staff profile selector */}
-          <div className="flex flex-col gap-1 rounded-lg bg-white/10 p-3 backdrop-blur-sm border border-white/10 min-w-[280px]">
-            <label className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-              Active Staff Profile:
-            </label>
-            <select
-              value={selectedStaffId}
-              onChange={(e) => setSelectedStaffId(Number(e.target.value))}
-              className="rounded bg-slate-800 text-xs text-white border border-slate-600 px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            >
-              {staffList.map((s) => (
-                <option key={s.staff_id} value={s.staff_id}>
-                  {s.full_name} ({s.designation} - {s.department})
-                </option>
-              ))}
-            </select>
-            <div className="mt-1 flex items-center justify-between text-[11px] text-slate-300">
-              <span>Dept: <strong>{currentStaff.department}</strong></span>
-              <span className="rounded bg-blue-400/20 px-1.5 py-0.2 text-[10px] text-blue-200">
-                {currentStaff.designation}
-              </span>
-            </div>
-          </div>
+      {/* Active Staff Profile Selector */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+            Active Staff Profile:
+          </label>
+          <select
+            value={selectedStaffId}
+            onChange={(e) => setSelectedStaffId(Number(e.target.value))}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            {staffList.map((s) => (
+              <option key={s.staff_id} value={s.staff_id}>
+                {s.full_name} ({s.designation} - {s.department})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex items-center gap-2 text-xs text-slate-500">
+          <span>Dept: <strong className="text-slate-700">{currentStaff.department}</strong></span>
+          <span className="rounded bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 border border-indigo-100">
+            {currentStaff.designation}
+          </span>
         </div>
       </div>
 
