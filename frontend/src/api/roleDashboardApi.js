@@ -1,21 +1,39 @@
 import { apiClient } from "./apiClient";
 
-// /me returns the user's profile/role only. Fetch the role-specific
-// dashboard endpoint after resolving the role.
-export async function fetchRoleDashboard() {
-  const meResponse = await apiClient.get("/api/role-dashboard/me");
-  const me = meResponse.data || {};
-  const role = String(me.role || me.role_name || "").trim().toLowerCase().replace(/[\\s-]+/g, "_");
-
+// Fetch role-specific live data directly from PostgreSQL backend
+export async function fetchRoleDashboard(roleOverride) {
   let endpoint;
-  if (["student", "faculty", "student_faculty", "user"].includes(role)) {
-    endpoint = "/api/role-dashboard/student";
-  } else if (["staff", "service_staff"].includes(role)) {
-    endpoint = "/api/role-dashboard/staff";
-  } else if (role === "manager") {
-    endpoint = "/api/role-dashboard/manager";
+  let targetRole = roleOverride;
+  let me = {};
+  let resolvedRole = targetRole ? String(targetRole).trim().toLowerCase().replace(/[\s-]+/g, "_") : "admin";
+
+  if (targetRole) {
+    if (["student", "faculty", "student_faculty", "user"].includes(resolvedRole)) {
+      endpoint = "/api/role-dashboard/student";
+    } else if (["staff", "service_staff"].includes(resolvedRole)) {
+      endpoint = "/api/role-dashboard/staff";
+    } else if (resolvedRole === "manager") {
+      endpoint = "/api/role-dashboard/manager";
+    } else {
+      endpoint = `/api/role-dashboard/${resolvedRole}`;
+    }
   } else {
-    throw new Error(`Unsupported dashboard role: ${role || "unknown"}`);
+    try {
+      const meResponse = await apiClient.get("/api/role-dashboard/me");
+      me = meResponse.data || {};
+      resolvedRole = String(me.role || me.role_name || "admin").trim().toLowerCase().replace(/[\s-]+/g, "_");
+      if (["student", "faculty", "student_faculty", "user"].includes(resolvedRole)) {
+        endpoint = "/api/role-dashboard/student";
+      } else if (["staff", "service_staff"].includes(resolvedRole)) {
+        endpoint = "/api/role-dashboard/staff";
+      } else if (resolvedRole === "manager") {
+        endpoint = "/api/role-dashboard/manager";
+      } else {
+        endpoint = `/api/role-dashboard/${resolvedRole}`;
+      }
+    } catch {
+      endpoint = "/api/role-dashboard/admin";
+    }
   }
 
   const response = await apiClient.get(endpoint);
@@ -50,8 +68,10 @@ export async function fetchRoleDashboard() {
   });
 
   const displayName =
-    me.fullname || me.full_name || me.name || payload.staff?.full_name ||
-    payload.manager?.full_name || me.email || "Dashboard user";
+    payload.display_name ||
+    me?.fullname || me?.full_name || me?.name ||
+    payload.staff?.full_name || payload.manager?.full_name ||
+    me?.email || (resolvedRole === "admin" ? "System Administrator" : `${resolvedRole.charAt(0).toUpperCase() + resolvedRole.slice(1)} Dashboard`);
 
   const team = payload.team || [];
   const workload = (payload.workload || team).map((item) => ({
@@ -63,8 +83,8 @@ export async function fetchRoleDashboard() {
 
   return {
     ...payload,
-    role,
-    display_name: payload.display_name || displayName,
+    role: resolvedRole,
+    display_name: displayName,
     kpis: {
       total: kpis.total ?? kpis.total_complaints ?? 0,
       pending: kpis.pending ?? 0,

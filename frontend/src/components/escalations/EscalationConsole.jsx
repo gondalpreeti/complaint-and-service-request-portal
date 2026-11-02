@@ -5,13 +5,71 @@ const API_BASE_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 const DEV_TOKEN =
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxIiwicm9sZSI6ImFkbWluIiwiZXhwIjo0MTAyNDQ0ODAwfQ.TkQTz9gu_19StaUCkk7pSuaDFaeQlI2M_71poqx4iNk";
 
-export default function EscalationConsole() {
+export const isCategoryMatchingDepartment = (
+  categoryName = "",
+  categoryId = null,
+  department = "",
+  staffCategoryId = null
+) => {
+  if (staffCategoryId && categoryId && Number(staffCategoryId) === Number(categoryId)) {
+    return true;
+  }
+  const dept = (department || "").toLowerCase().trim();
+  const cat = (categoryName || "").toLowerCase().trim();
+  if (!dept) return true;
+
+  if (cat === dept) return true;
+  if (cat.includes(dept) || dept.includes(cat)) return true;
+
+  // Department-specific mappings
+  if (dept === "infrastructure" && (cat.includes("infra") || cat.includes("electrical") || Number(categoryId) === 8)) {
+    return true;
+  }
+  if (dept === "it" && (cat === "it" || cat.includes("information technology") || Number(categoryId) === 9)) {
+    return true;
+  }
+  if ((dept.includes("plumb") || dept.includes("clean")) && (cat.includes("plumb") || cat.includes("clean") || Number(categoryId) === 6)) {
+    return true;
+  }
+  if (dept.includes("hostel") && (cat.includes("hostel") || Number(categoryId) === 5)) {
+    return true;
+  }
+  if (dept.includes("library") && (cat.includes("library") || Number(categoryId) === 4)) {
+    return true;
+  }
+  if (dept.includes("exam") && (cat.includes("exam") || Number(categoryId) === 3)) {
+    return true;
+  }
+  if (dept.includes("account") && (cat.includes("account") || Number(categoryId) === 1)) {
+    return true;
+  }
+  if (dept.includes("admiss") && (cat.includes("admiss") || Number(categoryId) === 2)) {
+    return true;
+  }
+  if (dept.includes("canteen") && (cat.includes("canteen") || Number(categoryId) === 7)) {
+    return true;
+  }
+  if (dept.includes("other") && (cat.includes("other") || Number(categoryId) === 10)) {
+    return true;
+  }
+
+  return false;
+};
+
+export default function EscalationConsole({ roleId, userProfile, userEmail } = {}) {
+  const effectiveRoleId = Number(roleId || localStorage.getItem("user_role_id") || 2);
   const [staffList, setStaffList] = useState([]);
   const [selectedStaffId, setSelectedStaffId] = useState(2); // Default Priya Patil
   const [tickets, setTickets] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(false);
   const [feedback, setFeedback] = useState(null);
+
+  // Filter and search states
+  const [filterPriority, setFilterPriority] = useState("all");
+  const [filterStatus, setFilterStatus] = useState("all");
+  const [filterCategory, setFilterCategory] = useState("all");
+  const [searchName, setSearchName] = useState("");
 
   // Modal states
   const [escalateModal, setEscalateModal] = useState(null); // { type: 'peer' | 'manager', ticket }
@@ -23,6 +81,116 @@ export default function EscalationConsole() {
   const [historyModal, setHistoryModal] = useState(null); // ticket
   const [auditLogs, setAuditLogs] = useState([]);
 
+  const currentStaff = staffList.find((s) => s.staff_id === Number(selectedStaffId)) || {
+    staff_id: selectedStaffId,
+    full_name: "Active Staff",
+    designation: "Staff",
+    department: userProfile?.department || localStorage.getItem("user_department") || "Operations",
+    category_id: null,
+  };
+
+  const activeDepartment = currentStaff.department || userProfile?.department || localStorage.getItem("user_department") || "";
+  const activeCategoryId = currentStaff.category_id;
+
+  // Filter staff dropdown for staff role if user has a assigned department
+  const displayedStaffList = React.useMemo(() => {
+    if (effectiveRoleId !== 4) return staffList;
+    const fixedDept = (userProfile?.department || localStorage.getItem("user_department") || "").toLowerCase().trim();
+    if (!fixedDept) return staffList;
+    const sameDept = staffList.filter(
+      (s) => (s.department || "").toLowerCase().trim() === fixedDept
+    );
+    return sameDept.length > 0 ? sameDept : staffList;
+  }, [staffList, effectiveRoleId, userProfile]);
+
+  // Dynamic categories extracted from tickets (scoped by department for staff)
+  const categories = React.useMemo(() => {
+    const cats = new Set();
+    const source = effectiveRoleId === 4 && activeDepartment
+      ? tickets.filter((t) =>
+          isCategoryMatchingDepartment(t.category_name, t.category_id, activeDepartment, activeCategoryId)
+        )
+      : tickets;
+
+    source.forEach((t) => {
+      if (t.category_name) cats.add(t.category_name);
+    });
+    return ["all", ...Array.from(cats).sort()];
+  }, [tickets, effectiveRoleId, activeDepartment, activeCategoryId]);
+
+  // Filtered and sorted tickets
+  // Requirement: In the escalations and actions tab, put sorting according to critical.
+  // Critical priorities have top most priority then high, medium, then low. Unassigned show first.
+  // For staff (role id = 4): strictly show only complaints of the category related to the staff department.
+  const filteredTickets = React.useMemo(() => {
+    let list = [...tickets];
+
+    // Staff department category scoping
+    if (effectiveRoleId === 4 && activeDepartment) {
+      list = list.filter((t) =>
+        isCategoryMatchingDepartment(t.category_name, t.category_id, activeDepartment, activeCategoryId)
+      );
+    }
+
+    // 1. Priority filter
+    if (filterPriority !== "all") {
+      list = list.filter(
+        (t) => (t.priority_status || "").toLowerCase() === filterPriority.toLowerCase()
+      );
+    }
+
+    // 2. Status filter
+    if (filterStatus !== "all") {
+      list = list.filter(
+        (t) => (t.status || "").toLowerCase() === filterStatus.toLowerCase()
+      );
+    }
+
+    // 3. Category filter
+    if (filterCategory !== "all") {
+      list = list.filter(
+        (t) => (t.category_name || "").toLowerCase() === filterCategory.toLowerCase()
+      );
+    }
+
+    // 4. Name / Keyword search
+    if (searchName.trim()) {
+      const q = searchName.trim().toLowerCase();
+      list = list.filter(
+        (t) =>
+          (t.staff_name && t.staff_name.toLowerCase().includes(q)) ||
+          (t.submitter_name && t.submitter_name.toLowerCase().includes(q)) ||
+          (t.subject && t.subject.toLowerCase().includes(q)) ||
+          (t.description && t.description.toLowerCase().includes(q)) ||
+          String(t.request_id).includes(q) ||
+          String(t.complaint_id).includes(q)
+      );
+    }
+
+    // 5. Sorting: Unassigned first, then Critical -> High -> Medium -> Low
+    const priorityRank = {
+      critical: 1,
+      high: 2,
+      medium: 3,
+      low: 4,
+    };
+
+    list.sort((a, b) => {
+      const isUnassignedA = !a.staff_id || (a.staff_name || "").toLowerCase() === "unassigned";
+      const isUnassignedB = !b.staff_id || (b.staff_name || "").toLowerCase() === "unassigned";
+      if (isUnassignedA && !isUnassignedB) return -1;
+      if (!isUnassignedA && isUnassignedB) return 1;
+
+      const rankA = priorityRank[(a.priority_status || "").toLowerCase()] || 5;
+      const rankB = priorityRank[(b.priority_status || "").toLowerCase()] || 5;
+      if (rankA !== rankB) return rankA - rankB;
+
+      return (b.request_id || 0) - (a.request_id || 0);
+    });
+
+    return list;
+  }, [tickets, filterPriority, filterStatus, filterCategory, searchName, effectiveRoleId, activeDepartment, activeCategoryId]);
+
   // Fetch staff list on mount
   useEffect(() => {
     async function loadStaff() {
@@ -31,7 +199,26 @@ export default function EscalationConsole() {
           headers: { Authorization: `Bearer ${DEV_TOKEN}` },
         });
         setStaffList(res.data);
-        if (res.data.length > 0 && !selectedStaffId) {
+
+        // Auto-match logged in staff by staff_id, email, or department
+        const targetStaffId = userProfile?.staff_id || localStorage.getItem("user_staff_id");
+        const targetEmail = (userProfile?.email || userEmail || localStorage.getItem("user_email") || "").toLowerCase().trim();
+        const targetDept = (userProfile?.department || localStorage.getItem("user_department") || "").toLowerCase().trim();
+
+        let matched = null;
+        if (targetStaffId) {
+          matched = res.data.find((s) => s.staff_id === Number(targetStaffId));
+        }
+        if (!matched && targetEmail) {
+          matched = res.data.find((s) => s.email && s.email.toLowerCase().trim() === targetEmail);
+        }
+        if (!matched && targetDept && effectiveRoleId === 4) {
+          matched = res.data.find((s) => (s.department || "").toLowerCase().trim() === targetDept);
+        }
+
+        if (matched) {
+          setSelectedStaffId(matched.staff_id);
+        } else if (res.data.length > 0 && !selectedStaffId) {
           setSelectedStaffId(res.data[0].staff_id);
         }
       } catch (err) {
@@ -39,7 +226,7 @@ export default function EscalationConsole() {
       }
     }
     loadStaff();
-  }, []);
+  }, [userProfile, userEmail, effectiveRoleId]);
 
   // Fetch active tickets when selected staff changes
   const loadTickets = async () => {
@@ -47,6 +234,11 @@ export default function EscalationConsole() {
     setFeedback(null);
     try {
       const res = await axios.get(`${API_BASE_URL}/api/escalations/all-active`, {
+        params: {
+          role_id: effectiveRoleId,
+          staff_id: selectedStaffId,
+          ...(effectiveRoleId === 4 && activeDepartment ? { department: activeDepartment, category_id: activeCategoryId } : {}),
+        },
         headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": selectedStaffId },
       });
       setTickets(res.data);
@@ -60,18 +252,12 @@ export default function EscalationConsole() {
 
   useEffect(() => {
     loadTickets();
-  }, [selectedStaffId]);
-
-  const currentStaff = staffList.find((s) => s.staff_id === Number(selectedStaffId)) || {
-    staff_id: selectedStaffId,
-    full_name: "Active Staff",
-    designation: "Staff",
-    department: "Operations",
-  };
+  }, [selectedStaffId, effectiveRoleId, activeDepartment, activeCategoryId]);
 
   // 1. Action: Start Progress
   const handleStartProgress = async (ticket) => {
     setActionLoading(true);
+    const actingStaffId = selectedStaffId || ticket.staff_id || currentStaff.staff_id;
     try {
       const res = await axios.post(
         `${API_BASE_URL}/api/escalations/status/start-progress`,
@@ -80,7 +266,7 @@ export default function EscalationConsole() {
           notes: "Staff has actively started diagnosis and resolution work.",
         },
         {
-          headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": selectedStaffId },
+          headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": actingStaffId },
         }
       );
       setFeedback({
@@ -104,16 +290,26 @@ export default function EscalationConsole() {
     setTargetStaffId("");
     setEligibleStaff([]);
     setEscalateModal({ type: "peer", ticket });
+    const actingStaffId = selectedStaffId || ticket.staff_id || currentStaff.staff_id;
     try {
       const res = await axios.get(`${API_BASE_URL}/api/escalations/staff/${ticket.request_id}`, {
-        headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": ticket.staff_id },
+        headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": actingStaffId },
       });
-      setEligibleStaff(res.data.staff || []);
-      if (res.data.staff?.length > 0) {
-        setTargetStaffId(res.data.staff[0].staff_id);
+      let staffResults = res.data.staff || [];
+      if (staffResults.length === 0) {
+        staffResults = staffList.filter((s) => s.staff_id !== actingStaffId);
+      }
+      setEligibleStaff(staffResults);
+      if (staffResults.length > 0) {
+        setTargetStaffId(staffResults[0].staff_id);
       }
     } catch (err) {
-      console.error("Failed to load eligible peer staff:", err);
+      console.warn("Peer staff endpoint fallback:", err);
+      const fallback = staffList.filter((s) => s.staff_id !== actingStaffId);
+      setEligibleStaff(fallback);
+      if (fallback.length > 0) {
+        setTargetStaffId(fallback[0].staff_id);
+      }
     }
   };
 
@@ -130,8 +326,9 @@ export default function EscalationConsole() {
       return;
     }
     setActionLoading(true);
+    const { type, ticket } = escalateModal;
+    const actingStaffId = selectedStaffId || ticket.staff_id || currentStaff.staff_id;
     try {
-      const { type, ticket } = escalateModal;
       let res;
       if (type === "peer") {
         res = await axios.post(
@@ -142,7 +339,7 @@ export default function EscalationConsole() {
             reason: escalationReason.trim(),
           },
           {
-            headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": ticket.staff_id },
+            headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": actingStaffId },
           }
         );
       } else {
@@ -153,7 +350,7 @@ export default function EscalationConsole() {
             reason: escalationReason.trim(),
           },
           {
-            headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": ticket.staff_id },
+            headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": actingStaffId },
           }
         );
       }
@@ -178,6 +375,7 @@ export default function EscalationConsole() {
       return;
     }
     setActionLoading(true);
+    const actingStaffId = selectedStaffId || resolveModal.staff_id || currentStaff.staff_id;
     try {
       const res = await axios.post(
         `${API_BASE_URL}/api/escalations/status/resolve`,
@@ -186,7 +384,7 @@ export default function EscalationConsole() {
           resolution_notes: resolutionNotes.trim(),
         },
         {
-          headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": resolveModal.staff_id },
+          headers: { Authorization: `Bearer ${DEV_TOKEN}`, "X-Staff-Id": actingStaffId },
         }
       );
       setResolveModal(null);
@@ -218,48 +416,34 @@ export default function EscalationConsole() {
 
   return (
     <div className="space-y-6">
-      {/* Top Banner & Persona Switcher */}
-      <div className="rounded-xl bg-gradient-to-r from-slate-900 via-indigo-950 to-slate-900 p-6 text-white shadow-md">
-        <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-          <div>
-            <div className="flex items-center gap-2">
-              <span className="rounded bg-blue-500/20 px-2 py-0.5 text-xs font-semibold text-blue-300 border border-blue-500/30">
-                Team 2 / Escalation &amp; Status Module
-              </span>
-              <span className="rounded bg-emerald-500/20 px-2 py-0.5 text-xs font-semibold text-emerald-300 border border-emerald-500/30">
-                100% Operational
-              </span>
-            </div>
-            <h2 className="mt-2 text-xl font-bold tracking-tight">Staff &amp; Escalation Operations Console</h2>
-            <p className="mt-1 text-xs text-slate-300">
-              Directly perform staff workflow actions: Start progress, trigger Horizontal (Staff-to-Staff) or Vertical
-              (Staff-to-Manager) escalations, resolve tickets, and inspect audit logs.
-            </p>
-          </div>
-
-          {/* Persona selector */}
-          <div className="flex flex-col gap-1 rounded-lg bg-white/10 p-3 backdrop-blur-sm border border-white/10 min-w-[280px]">
-            <label className="text-[11px] font-semibold text-slate-300 uppercase tracking-wider">
-              Simulated Staff Account:
-            </label>
-            <select
-              value={selectedStaffId}
-              onChange={(e) => setSelectedStaffId(Number(e.target.value))}
-              className="rounded bg-slate-800 text-xs text-white border border-slate-600 px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-400"
-            >
-              {staffList.map((s) => (
-                <option key={s.staff_id} value={s.staff_id}>
-                  {s.full_name} ({s.designation} - {s.department})
-                </option>
-              ))}
-            </select>
-            <div className="mt-1 flex items-center justify-between text-[11px] text-slate-300">
-              <span>Dept: <strong>{currentStaff.department}</strong></span>
-              <span className="rounded bg-blue-400/20 px-1.5 py-0.2 text-[10px] text-blue-200">
-                {currentStaff.designation}
-              </span>
-            </div>
-          </div>
+      {/* Active Staff Profile Selector */}
+      <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-wrap items-center gap-3">
+          <label className="text-xs font-semibold uppercase tracking-wider text-slate-700">
+            Active Staff Profile:
+          </label>
+          <select
+            value={selectedStaffId}
+            onChange={(e) => setSelectedStaffId(Number(e.target.value))}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-xs font-medium text-slate-800 shadow-sm focus:border-indigo-500 focus:outline-none focus:ring-2 focus:ring-indigo-500"
+          >
+            {displayedStaffList.map((s) => (
+              <option key={s.staff_id} value={s.staff_id}>
+                {s.full_name} ({s.designation} - {s.department})
+              </option>
+            ))}
+          </select>
+        </div>
+        <div className="flex flex-wrap items-center gap-2 text-xs text-slate-500">
+          <span>Dept: <strong className="text-slate-700">{currentStaff.department}</strong></span>
+          <span className="rounded bg-indigo-50 px-2 py-0.5 text-[11px] font-semibold text-indigo-700 border border-indigo-100">
+            {currentStaff.designation}
+          </span>
+          {effectiveRoleId === 4 && (
+            <span className="rounded bg-emerald-50 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-700 border border-emerald-200">
+              Department Scoped: {currentStaff.department}
+            </span>
+          )}
         </div>
       </div>
 
@@ -279,13 +463,17 @@ export default function EscalationConsole() {
         </div>
       )}
 
-      {/* Tickets List */}
+      {/* Tickets List & Filters */}
       <div className="rounded-xl bg-white p-6 shadow-sm border border-slate-200">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b border-slate-100 pb-4">
           <div>
-            <h3 className="text-base font-bold text-slate-900">Active Service Request Queue</h3>
+            <h3 className="text-base font-bold text-slate-900">
+              Active Service Request Queue {effectiveRoleId === 4 && `(${currentStaff.department} Department)`}
+            </h3>
             <p className="text-xs text-slate-500">
-              Showing tickets currently assigned across departments with live status transition and escalation triggers.
+              {effectiveRoleId === 4
+                ? `Showing only ${currentStaff.department} category complaints, sorted by priority (Critical first, Unassigned at top).`
+                : "Showing tickets sorted by priority (Critical first, Unassigned at top) with multi-criteria filtering."}
             </p>
           </div>
           <button
@@ -297,128 +485,254 @@ export default function EscalationConsole() {
           </button>
         </div>
 
+        {/* Filters and Search Bar (Priority, Status, Name, Category) */}
+        <div className="mb-6 rounded-lg bg-slate-50 p-4 border border-slate-200">
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+            {/* 1. Name / Search filter */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Search Name / Ticket
+              </label>
+              <div className="relative">
+                <input
+                  type="text"
+                  placeholder="Student, staff, or subject..."
+                  value={searchName}
+                  onChange={(e) => setSearchName(e.target.value)}
+                  className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-800 placeholder-slate-400 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+                />
+                {searchName && (
+                  <button
+                    onClick={() => setSearchName("")}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 text-xs text-slate-400 hover:text-slate-600"
+                  >
+                    ✕
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* 2. Priority Filter */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Priority
+              </label>
+              <select
+                value={filterPriority}
+                onChange={(e) => setFilterPriority(e.target.value)}
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="all">All Priorities</option>
+                <option value="critical">Critical (Highest)</option>
+                <option value="high">High</option>
+                <option value="medium">Medium</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+
+            {/* 3. Status Filter */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Status
+              </label>
+              <select
+                value={filterStatus}
+                onChange={(e) => setFilterStatus(e.target.value)}
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <option value="all">All Statuses</option>
+                <option value="pending">Pending</option>
+                <option value="assigned">Assigned</option>
+                <option value="in progress">In Progress</option>
+                <option value="resolved">Resolved</option>
+                <option value="closed">Closed</option>
+              </select>
+            </div>
+
+            {/* 4. Category Filter */}
+            <div>
+              <label className="block text-xs font-semibold text-slate-700 mb-1">
+                Category
+              </label>
+              <select
+                value={filterCategory}
+                onChange={(e) => setFilterCategory(e.target.value)}
+                className="w-full rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs text-slate-800 focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                {categories.map((cat) => (
+                  <option key={cat} value={cat}>
+                    {cat === "all" ? "All Categories" : cat}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
+          {/* Active filter summary & reset */}
+          {(filterPriority !== "all" ||
+            filterStatus !== "all" ||
+            filterCategory !== "all" ||
+            searchName.trim()) && (
+            <div className="mt-3 flex items-center justify-between border-t border-slate-200 pt-2 text-xs">
+              <span className="text-slate-600">
+                Filtered: <strong>{filteredTickets.length}</strong> of{" "}
+                <strong>{tickets.length}</strong> service requests
+              </span>
+              <button
+                onClick={() => {
+                  setFilterPriority("all");
+                  setFilterStatus("all");
+                  setFilterCategory("all");
+                  setSearchName("");
+                }}
+                className="font-medium text-blue-600 hover:text-blue-800 underline"
+              >
+                Reset All Filters
+              </button>
+            </div>
+          )}
+        </div>
+
         {loading ? (
           <div className="py-12 text-center text-sm text-slate-500">Loading service requests...</div>
-        ) : tickets.length === 0 ? (
+        ) : filteredTickets.length === 0 ? (
           <div className="py-12 text-center text-sm text-slate-400">
-            No active assigned tickets found. Use "+ File Complaint" above to register a complaint.
+            No service requests match the selected filters.
           </div>
         ) : (
           <div className="space-y-4">
-            {tickets.map((t) => (
-              <div
-                key={t.assignment_id}
-                className="rounded-lg border border-slate-200 bg-white p-5 transition-shadow hover:shadow-md"
-              >
-                <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
-                  {/* Ticket Details */}
-                  <div className="space-y-2 flex-1">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
-                        SR #{t.request_id} (CMP #{t.complaint_id})
-                      </span>
-                      <span className="text-xs font-medium text-slate-500">• {t.category_name}</span>
-                      <span
-                        className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
-                          t.priority_status === "Critical"
-                            ? "bg-red-100 text-red-700 border border-red-200"
-                            : t.priority_status === "High"
-                            ? "bg-orange-100 text-orange-700 border border-orange-200"
-                            : t.priority_status === "Medium"
-                            ? "bg-amber-100 text-amber-700 border border-amber-200"
-                            : "bg-emerald-100 text-emerald-700 border border-emerald-200"
-                        }`}
-                      >
-                        Priority: {t.priority_status}
-                      </span>
-                      <span
-                        className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
-                          t.status === "In Progress"
-                            ? "bg-violet-100 text-violet-700 border border-violet-200"
-                            : t.status === "Completed" || t.status === "Resolved"
-                            ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
-                            : "bg-blue-100 text-blue-700 border border-blue-200"
-                        }`}
-                      >
-                        Status: {t.status}
-                      </span>
-                    </div>
-
-                    <h4 className="text-sm font-semibold text-slate-900">{t.subject}</h4>
-                    <p className="text-xs text-slate-600 line-clamp-2">{t.description}</p>
-
-                    <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500 pt-1 border-t border-slate-50">
-                      <span>
-                        Assigned To: <strong className="text-slate-700">{t.staff_name}</strong> ({t.designation})
-                      </span>
-                      {t.due_date && <span>Due Date: <strong>{t.due_date}</strong></span>}
-                      {t.remarks && (
-                        <span className="text-slate-400 italic max-w-md truncate" title={t.remarks}>
-                          Notes: {t.remarks}
+            {filteredTickets.map((t) => {
+              const isUnassigned = !t.staff_id || (t.staff_name || "").toLowerCase() === "unassigned";
+              return (
+                <div
+                  key={`${t.request_id}-${t.assignment_id || "unassigned"}`}
+                  className={`rounded-lg border bg-white p-5 transition-shadow hover:shadow-md ${
+                    isUnassigned ? "border-amber-300 bg-amber-50/20" : "border-slate-200"
+                  }`}
+                >
+                  <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-4">
+                    {/* Ticket Details */}
+                    <div className="space-y-2 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="font-mono text-xs font-bold text-blue-600 bg-blue-50 px-2 py-0.5 rounded border border-blue-200">
+                          SR #{t.request_id} (CMP #{t.complaint_id})
                         </span>
-                      )}
+                        <span className="text-xs font-medium text-slate-500">• {t.category_name}</span>
+
+                        {/* Unassigned badge */}
+                        {isUnassigned && (
+                          <span className="rounded bg-rose-100 text-rose-700 border border-rose-300 px-2 py-0.5 text-[10px] font-bold uppercase">
+                            ⚠️ Unassigned
+                          </span>
+                        )}
+
+                        <span
+                          className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
+                            t.priority_status === "Critical"
+                              ? "bg-red-100 text-red-700 border border-red-200"
+                              : t.priority_status === "High"
+                              ? "bg-orange-100 text-orange-700 border border-orange-200"
+                              : t.priority_status === "Medium"
+                              ? "bg-amber-100 text-amber-700 border border-amber-200"
+                              : "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                          }`}
+                        >
+                          Priority: {t.priority_status}
+                        </span>
+                        <span
+                          className={`rounded px-2 py-0.5 text-[10px] font-bold uppercase ${
+                            t.status === "In Progress"
+                              ? "bg-violet-100 text-violet-700 border border-violet-200"
+                              : t.status === "Completed" || t.status === "Resolved"
+                              ? "bg-emerald-100 text-emerald-700 border border-emerald-200"
+                              : "bg-blue-100 text-blue-700 border border-blue-200"
+                          }`}
+                        >
+                          Status: {t.status}
+                        </span>
+                      </div>
+
+                      <h4 className="text-sm font-semibold text-slate-900">{t.subject}</h4>
+                      <p className="text-xs text-slate-600 line-clamp-2">{t.description}</p>
+
+                      <div className="flex flex-wrap items-center gap-4 text-[11px] text-slate-500 pt-1 border-t border-slate-50">
+                        <span>
+                          Complainant: <strong className="text-slate-700">{t.submitter_name || "Student"}</strong>
+                        </span>
+                        <span>
+                          Assigned To: <strong className="text-slate-700">{t.staff_name}</strong> {t.designation && t.designation !== "Unassigned" ? `(${t.designation})` : ""}
+                        </span>
+                        {t.due_date && <span>Due Date: <strong>{t.due_date}</strong></span>}
+                        {t.remarks && (
+                          <span className="text-slate-400 italic max-w-md truncate" title={t.remarks}>
+                            Notes: {t.remarks}
+                          </span>
+                        )}
+                      </div>
                     </div>
-                  </div>
 
-                  {/* Operational Action Buttons */}
-                  <div className="flex flex-wrap items-center gap-2 pt-2 lg:pt-0 lg:flex-col lg:items-end">
-                    {/* Button 1: Start Progress */}
-                    {t.status.toLowerCase() !== "in progress" && (
+                    {/* Operational Action Buttons */}
+                    <div className="flex flex-wrap items-center gap-2 pt-2 lg:pt-0 lg:flex-col lg:items-end">
+                      {/* Button 1: Start Progress */}
+                      {t.status.toLowerCase() !== "in progress" && (
+                        <button
+                          onClick={() => handleStartProgress(t)}
+                          disabled={actionLoading}
+                          className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-violet-700 transition-colors flex items-center gap-1.5"
+                          title="Mark ticket as active in progress"
+                        >
+                          ▶ Start Progress
+                        </button>
+                      )}
+
+                      {/* Button 2: Peer Escalate */}
                       <button
-                        onClick={() => handleStartProgress(t)}
+                        onClick={() => openPeerEscalation(t)}
                         disabled={actionLoading}
-                        className="rounded-md bg-violet-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-violet-700 transition-colors flex items-center gap-1.5"
-                        title="Mark ticket as active in progress"
+                        className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-amber-600 transition-colors flex items-center gap-1.5"
+                        title="Escalate horizontally to another staff member in the same department"
                       >
-                        ▶ Start Progress
+                        👥 Peer Escalate
                       </button>
-                    )}
 
-                    {/* Button 2: Peer Escalate */}
-                    <button
-                      onClick={() => openPeerEscalation(t)}
-                      disabled={actionLoading}
-                      className="rounded-md bg-amber-500 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-amber-600 transition-colors flex items-center gap-1.5"
-                      title="Escalate horizontally to another staff member in the same department"
-                    >
-                      👥 Peer Escalate
-                    </button>
+                      {/* Button 3: Escalate to Manager (Removed for Manager roleId === 3) */}
+                      {effectiveRoleId !== 3 && (
+                        <button
+                          onClick={() => openManagerEscalation(t)}
+                          disabled={actionLoading}
+                          className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 transition-colors flex items-center gap-1.5"
+                          title="Escalate vertically to departmental manager with priority elevation"
+                        >
+                          ⬆ Escalate to Manager
+                        </button>
+                      )}
 
-                    {/* Button 3: Escalate to Manager */}
-                    <button
-                      onClick={() => openManagerEscalation(t)}
-                      disabled={actionLoading}
-                      className="rounded-md bg-red-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-red-700 transition-colors flex items-center gap-1.5"
-                      title="Escalate vertically to departmental manager with priority elevation"
-                    >
-                      ⬆ Escalate to Manager
-                    </button>
+                      {/* Button 4: Resolve Ticket */}
+                      <button
+                        onClick={() => {
+                          setResolutionNotes("");
+                          setResolveModal(t);
+                        }}
+                        disabled={actionLoading}
+                        className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors flex items-center gap-1.5"
+                        title="Resolve this ticket and mark complaint as solved"
+                      >
+                        ✓ Mark Solved
+                      </button>
 
-                    {/* Button 4: Resolve Ticket */}
-                    <button
-                      onClick={() => {
-                        setResolutionNotes("");
-                        setResolveModal(t);
-                      }}
-                      disabled={actionLoading}
-                      className="rounded-md bg-emerald-600 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-emerald-700 transition-colors flex items-center gap-1.5"
-                      title="Resolve this ticket and mark complaint as solved"
-                    >
-                      ✓ Mark Solved
-                    </button>
-
-                    {/* Button 5: View Escalation Audit Trail */}
-                    <button
-                      onClick={() => openHistory(t)}
-                      className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50 transition-colors"
-                      title="Inspect permanent audit trail in escalation_logs"
-                    >
-                      📜 Audit Logs
-                    </button>
+                      {/* Button 5: View Escalation Audit Trail */}
+                      <button
+                        onClick={() => openHistory(t)}
+                        className="rounded-md border border-slate-300 bg-white px-2.5 py-1 text-[11px] font-medium text-slate-600 hover:bg-slate-50 transition-colors"
+                        title="Inspect permanent audit trail in escalation_logs"
+                      >
+                        📜 Audit Logs
+                      </button>
+                    </div>
                   </div>
                 </div>
-              </div>
-            ))}
+              );
+            })}
           </div>
         )}
       </div>
@@ -453,10 +767,10 @@ export default function EscalationConsole() {
               {escalateModal.type === "peer" ? (
                 <div>
                   <label className="block text-xs font-semibold text-slate-700 mb-1">
-                    Select Available Peer Staff in {escalateModal.ticket.department}:
+                    Select Available Staff:
                   </label>
                   {eligibleStaff.length === 0 ? (
-                    <p className="text-xs text-amber-600">No other staff available in this department.</p>
+                    <p className="text-xs text-amber-600">No staff currently available.</p>
                   ) : (
                     <select
                       value={targetStaffId}
@@ -465,7 +779,7 @@ export default function EscalationConsole() {
                     >
                       {eligibleStaff.map((s) => (
                         <option key={s.staff_id} value={s.staff_id}>
-                          {s.full_name} ({s.designation} - {s.availability_status})
+                          {s.full_name} ({s.department} • {s.designation} — {s.availability_status})
                         </option>
                       ))}
                     </select>

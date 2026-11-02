@@ -11,7 +11,7 @@ import Dashboard from '../frontend/src/pages/Dashboard'
 import './styles/auth.css'
 
 function AppContent() {
-  const { currentView, loading, user, navigateTo, logout } = useAuth()
+  const { currentView, loading, user, role, roleId, setRoleId, userProfile, navigateTo, logout } = useAuth()
 
   // Initial session check loading screen
   if (loading) {
@@ -31,6 +31,10 @@ function AppContent() {
           onNavigate={navigateTo}
           onLogout={logout}
           userEmail={user?.email}
+          roleId={roleId}
+          role={role}
+          userProfile={userProfile}
+          setRoleId={setRoleId}
         />
       )
 

@@ -18,12 +18,17 @@ import sys
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Header, status
+from fastapi import APIRouter, Depends, HTTPException, Header, Query, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel
 
-# Ensure dbconnections directory is on python path (checks repo root or parent workspace)
-for p in (Path(__file__).resolve().parents[3] / "dbconnections", Path(__file__).resolve().parents[4] / "dbconnections"):
+# Ensure dbconnections directory and repository root are on python path
+for p in (
+    Path(__file__).resolve().parents[3],
+    Path(__file__).resolve().parents[3] / "dbconnections",
+    Path(__file__).resolve().parents[4],
+    Path(__file__).resolve().parents[4] / "dbconnections",
+):
     if p.exists() and str(p) not in sys.path:
         sys.path.insert(0, str(p))
 
@@ -362,7 +367,7 @@ async def get_manager_pending_escalations(
 @router.get("/staff-list")
 async def get_all_staff_members():
     """
-    Returns list of all active staff members with designations and departments
+    Returns list of all active staff members with designations, departments, and category_id
     to easily switch view in the Staff Portal.
     """
     conn = _service.connection_factory()
@@ -371,7 +376,7 @@ async def get_all_staff_members():
     cursor = conn.cursor()
     try:
         cursor.execute("""
-            SELECT staff_id, full_name, email, department, designation, availability_status
+            SELECT staff_id, full_name, email, department, designation, availability_status, category_id
             FROM staff
             ORDER BY department, designation DESC, full_name;
         """)
@@ -383,7 +388,8 @@ async def get_all_staff_members():
                 "email": r[2],
                 "department": r[3],
                 "designation": r[4],
-                "availability_status": str(r[5])
+                "availability_status": str(r[5]),
+                "category_id": r[6]
             }
             for r in rows
         ]
@@ -393,41 +399,89 @@ async def get_all_staff_members():
 
 
 @router.get("/all-active")
-async def get_all_active_assignments():
+async def get_all_active_assignments(
+    department: Optional[str] = None,
+    category_id: Optional[int] = None,
+    role_id: Optional[int] = None,
+    staff_id: Optional[int] = None,
+    x_staff_id: Optional[int] = Header(None, alias="X-Staff-Id"),
+):
     """
-    Returns all active assignments across departments with complaint info and assigned staff
+    Returns active assignments across departments with complaint info and assigned staff
     for the unified Staff & Escalations Console.
+    For staff (role_id = 4), strictly scopes results to the complaints of their department's category.
     """
     conn = _service.connection_factory()
     if not conn:
         raise HTTPException(status_code=500, detail="Database connection failed")
     cursor = conn.cursor()
     try:
-        cursor.execute("""
+        target_cat_id = category_id if isinstance(category_id, int) else None
+        target_dept = department if isinstance(department, str) and department.strip() else None
+        effective_staff_id = staff_id if isinstance(staff_id, int) else (x_staff_id if isinstance(x_staff_id, int) else None)
+        effective_role_id = role_id if isinstance(role_id, int) else None
+
+        # If role_id is 4 (staff) and no explicit department/category passed, resolve from staff
+        if (effective_role_id == 4 or not (target_cat_id or target_dept)) and effective_staff_id and effective_role_id == 4:
+            cursor.execute("SELECT department, category_id FROM staff WHERE staff_id = %s;", (effective_staff_id,))
+            st_row = cursor.fetchone()
+            if st_row:
+                target_dept = st_row[0]
+                target_cat_id = st_row[1]
+
+        query = """
             SELECT 
-                a.assignment_id,
-                a.request_id,
+                COALESCE(a.assignment_id, 0) AS assignment_id,
+                sr.request_id,
                 sr.complaint_id,
                 c.subject,
                 c.description,
-                cat.category_name,
+                COALESCE(cat.category_name, 'General') AS category_name,
+                COALESCE(sr.category_id, c.category_id, cat.category_id, 0) AS category_id,
                 sr.priority_status::text,
                 sr.status::text,
                 a.staff_id,
-                s.full_name AS staff_name,
-                s.designation,
-                s.department,
+                COALESCE(s.full_name, 'Unassigned') AS staff_name,
+                COALESCE(s.designation, 'Unassigned') AS designation,
+                COALESCE(s.department, cat.category_name, 'General') AS department,
                 a.assigned_date::text,
                 a.due_date::text,
-                a.remarks
-            FROM assignment a
-            JOIN service_request sr ON sr.request_id = a.request_id
+                a.remarks,
+                COALESCE(u.fullname, u.email, 'Student') AS submitter_name
+            FROM service_request sr
             JOIN complaints c ON c.complaint_id = sr.complaint_id
-            LEFT JOIN categories cat ON cat.category_id = sr.category_id
-            JOIN staff s ON s.staff_id = a.staff_id
-            WHERE a.assignment_status = 'active'
-            ORDER BY a.assignment_id DESC;
-        """)
+            LEFT JOIN users u ON u.user_id = c.user_id
+            LEFT JOIN categories cat ON cat.category_id = COALESCE(sr.category_id, c.category_id)
+            LEFT JOIN assignment a ON a.request_id = sr.request_id AND a.assignment_status = 'active'
+            LEFT JOIN staff s ON s.staff_id = a.staff_id
+        """
+        conditions = []
+        params = []
+
+        if target_cat_id:
+            dept_pattern = f"%{target_dept.lower()}%" if target_dept else "%"
+            conditions.append("(COALESCE(sr.category_id, c.category_id, cat.category_id) = %s OR LOWER(cat.category_name) LIKE %s)")
+            params.extend([target_cat_id, dept_pattern])
+        elif target_dept:
+            conditions.append("(LOWER(cat.category_name) LIKE %s OR LOWER(COALESCE(s.department, '')) = %s)")
+            params.extend([f"%{target_dept.lower()}%", target_dept.lower()])
+
+        if conditions:
+            query += " WHERE " + " AND ".join(conditions)
+
+        query += """
+            ORDER BY 
+                CASE WHEN a.staff_id IS NULL THEN 0 ELSE 1 END,
+                CASE LOWER(sr.priority_status::text)
+                    WHEN 'critical' THEN 1
+                    WHEN 'high' THEN 2
+                    WHEN 'medium' THEN 3
+                    WHEN 'low' THEN 4
+                    ELSE 5
+                END,
+                sr.request_id DESC;
+        """
+        cursor.execute(query, tuple(params))
         rows = cursor.fetchall()
         return [
             {
@@ -437,15 +491,17 @@ async def get_all_active_assignments():
                 "subject": r[3],
                 "description": r[4],
                 "category_name": r[5] or "General",
-                "priority_status": (r[6] or "medium").title(),
-                "status": (r[7] or "assigned").title(),
-                "staff_id": r[8],
-                "staff_name": r[9],
-                "designation": r[10],
-                "department": r[11],
-                "assigned_date": r[12][:10] if r[12] else "",
-                "due_date": r[13][:10] if r[13] else "",
-                "remarks": r[14] or ""
+                "category_id": r[6],
+                "priority_status": (r[7] or "medium").title(),
+                "status": (r[8] or "assigned").title(),
+                "staff_id": r[9],
+                "staff_name": r[10],
+                "designation": r[11],
+                "department": r[12],
+                "assigned_date": r[13][:10] if r[13] else "",
+                "due_date": r[14][:10] if r[14] else "",
+                "remarks": r[15] or "",
+                "submitter_name": r[16] or "Student"
             }
             for r in rows
         ]

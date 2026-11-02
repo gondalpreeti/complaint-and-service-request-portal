@@ -1,11 +1,11 @@
-"""
-FastAPI application entrypoint.
-"""
+from dotenv import load_dotenv
+load_dotenv()
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.core.database import connect_db, disconnect_db
-from app.routers import dashboard, escalations, reports, auth
+from app.routers import dashboard, escalations, reports, auth, role_dashboard
 
 app = FastAPI(title="Complaint & Service Request Portal API")
 
@@ -37,6 +37,7 @@ app.include_router(dashboard.router)
 app.include_router(reports.router)
 app.include_router(escalations.router)
 app.include_router(auth.router)
+app.include_router(role_dashboard.router)
 
 
 @app.get("/health")

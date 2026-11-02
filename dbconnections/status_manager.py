@@ -126,22 +126,25 @@ class ComplaintStatusManager:
 
         cursor = conn.cursor()
         try:
-            # 1. Verify active assignment for this staff
+            # 1. Verify or create active assignment
             cursor.execute("""
                 SELECT assignment_id, remarks
                 FROM assignment
-                WHERE request_id = %s AND staff_id = %s AND assignment_status = 'active';
-            """, (request_id, staff_id))
+                WHERE request_id = %s AND assignment_status = 'active';
+            """, (request_id,))
             assignment = cursor.fetchone()
-            if not assignment:
-                return StatusUpdateResult(
-                    success=False,
-                    message=f"Staff #{staff_id} does not have an active assignment on Request #{request_id}.",
-                    request_id=request_id,
-                    previous_status="unknown",
-                    new_status="unknown"
-                )
-            assignment_id, existing_remarks = assignment
+            if assignment:
+                assignment_id, existing_remarks = assignment
+            else:
+                # Auto-assign this unassigned request to the acting staff member
+                cursor.execute("""
+                    INSERT INTO assignment 
+                    (request_id, staff_id, assigned_by, assignment_status, assigned_date, due_date, remarks)
+                    VALUES (%s, %s, %s, 'active', NOW(), NOW() + INTERVAL '2 days', %s)
+                    RETURNING assignment_id, remarks;
+                """, (request_id, staff_id, staff_id, "Assigned upon starting progress."))
+                assignment = cursor.fetchone()
+                assignment_id, existing_remarks = assignment
 
             # 2. Verify current status
             cursor.execute("""
@@ -163,10 +166,10 @@ class ComplaintStatusManager:
             current_status = str(sr_row[0])
             complaint_id, subject = sr_row[1], sr_row[2]
 
-            if current_status not in (ComplaintStatus.SR_ASSIGNED, ComplaintStatus.SR_PENDING):
+            if current_status in (ComplaintStatus.SR_COMPLETED, ComplaintStatus.SR_CLOSED):
                 return StatusUpdateResult(
                     success=False,
-                    message=f"Cannot start work. Current status is '{current_status}' (expected 'assigned' or 'pending').",
+                    message=f"Cannot start work. Ticket is already '{current_status}'.",
                     request_id=request_id,
                     previous_status=current_status,
                     new_status=current_status
@@ -266,22 +269,23 @@ class ComplaintStatusManager:
 
         cursor = conn.cursor()
         try:
-            # 1. Verify active assignment
+            # 1. Verify or create active assignment for completion
             cursor.execute("""
                 SELECT assignment_id
                 FROM assignment
-                WHERE request_id = %s AND staff_id = %s AND assignment_status = 'active';
-            """, (request_id, resolved_by_staff_id))
+                WHERE request_id = %s AND assignment_status = 'active';
+            """, (request_id,))
             assignment = cursor.fetchone()
-            if not assignment:
-                return StatusUpdateResult(
-                    success=False,
-                    message=f"Staff #{resolved_by_staff_id} does not have an active assignment on Request #{request_id}.",
-                    request_id=request_id,
-                    previous_status="unknown",
-                    new_status="unknown"
-                )
-            assignment_id = assignment[0]
+            if assignment:
+                assignment_id = assignment[0]
+            else:
+                cursor.execute("""
+                    INSERT INTO assignment 
+                    (request_id, staff_id, assigned_by, assignment_status, assigned_date, due_date, remarks)
+                    VALUES (%s, %s, %s, 'completed', NOW(), NOW(), %s)
+                    RETURNING assignment_id;
+                """, (request_id, resolved_by_staff_id, resolved_by_staff_id, f"Resolved: {resolution_notes}"))
+                assignment_id = cursor.fetchone()[0]
 
             # 2. Get current ticket details
             cursor.execute("""
